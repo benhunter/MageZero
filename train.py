@@ -1,9 +1,12 @@
 import torch
+import torch.nn.functional as F
 from torch import nn, optim
-from torch.utils.data import DataLoader
-from dataset import LabeledStateDataset,collate_batch
+from torch.utils.data import ConcatDataset, DataLoader, Subset
+from dataset import LabeledStateDataset, collate_batch
+from typing import Set, List, Tuple
 ACTIONS_MAX = 128
 GLOBAL_MAX = 100000
+IS_MCTS = False
 
 
 class Net(nn.Module):
@@ -19,6 +22,8 @@ class Net(nn.Module):
             mode='sum',
             sparse=True
         )
+        # 1. Define the learnable bias parameter
+        self.embedding_bias = nn.Parameter(torch.zeros(embedding_dim))
 
         self.fc_after_embedding = nn.Sequential(
             nn.Linear(embedding_dim, hidden_dim_mlp),  # From 512 to 256
@@ -33,18 +38,23 @@ class Net(nn.Module):
 
     def forward(self, indices, offsets):
         embedded_sum = self.embedding_bag(indices, offsets)
-        h = self.fc_after_embedding(embedded_sum)
+        # 2. Add the bias to the embedding bag's output
+        biased_embedded_sum = embedded_sum + self.embedding_bias
+        h = self.fc_after_embedding(biased_embedded_sum)
         return self.policy_head(h), self.value_head(h).squeeze(-1)
 
 
+
 def train():
-    ds = LabeledStateDataset("data/UWTempo2/ver6/training.bin")
-    #ds.states = ds.states.mul(2.0).sub(1.0) #fix activations
-    dl = DataLoader(ds, batch_size=128, shuffle=True, num_workers=4, collate_fn=collate_batch)
+    ds1 = LabeledStateDataset("data/UWTempo/ver3/training.bin")
+    #ds2 = LabeledStateDataset("data/UWTempo/ver3/training.bin")
+    combined_ds = Subset(ds1, range(0,2000)) #ConcatDataset([ds1, ds2])
+    dl = DataLoader(combined_ds, batch_size=128, shuffle=True, num_workers=4, collate_fn=collate_batch)
     model = Net(GLOBAL_MAX, ACTIONS_MAX).cuda()
 
+
     sparse_params = model.embedding_bag.parameters()
-    opt_sparse = optim.SparseAdam(sparse_params, lr=1e-3)
+    opt_sparse = optim.SparseAdam(sparse_params, lr=5e-4)#optim.SparseAdam(sparse_params, lr=1e-3)
 
     # Optimizer for all other (dense) parameters
     dense_params = []
@@ -53,8 +63,29 @@ def train():
             dense_params.append(param)
     opt_dense = optim.Adam(dense_params, lr=1e-3)
 
-    ce    = nn.CrossEntropyLoss()
-    mse   = nn.MSELoss()
+    checkpoint_path = f"models/model0/ckpt_15.pt"  # Example: Starting from ckpt_16
+
+    try:
+        checkpoint = torch.load(checkpoint_path, map_location="cuda")
+        model.load_state_dict(checkpoint['model_state_dict'])
+        opt_sparse.load_state_dict(checkpoint['optimizer_sparse_state_dict'])
+        opt_dense.load_state_dict(checkpoint['optimizer_dense_state_dict'])
+        # start_epoch = checkpoint['epoch'] + 1 # Use this if you want to continue the same run
+        print(f"Successfully loaded checkpoint from {checkpoint_path}")
+        # If continuing a run, you might load the epoch and loss too:
+        # last_epoch = checkpoint['epoch']
+        # print(f"Resuming training from epoch {last_epoch + 1}")
+
+    except FileNotFoundError:
+        print(f"INFO: Checkpoint file not found at {checkpoint_path}. Starting from scratch.")
+    except Exception as e:
+        print(f"ERROR: Could not load checkpoint. {e}. Starting from scratch.")
+
+    ce = nn.CrossEntropyLoss()
+    mse = nn.MSELoss()
+    #for mcts
+    kld_loss = nn.KLDivLoss(reduction="batchmean")
+
 
     for epoch in range(1, 21):
         total_p_loss, total_v_loss = 0.0, 0.0  # Initialize as floats
@@ -71,9 +102,12 @@ def train():
             # 6. Model call uses indices and offsets
             policy_logits, value_pred = model(batch_indices, batch_offsets)
 
-
-            policy_target_indices = torch.argmax(batch_policy_labels, dim=1)
-            lp = ce(policy_logits, policy_target_indices)
+            if IS_MCTS:
+                log_policy_probs = F.log_softmax(policy_logits, dim=1)
+                lp = kld_loss(log_policy_probs, batch_policy_labels)
+            else:
+                policy_target_indices = torch.argmax(batch_policy_labels, dim=1)
+                lp = ce(policy_logits, policy_target_indices)
 
             lv = mse(value_pred, batch_value_labels.squeeze(-1))  # Ensure batch_value_labels is shape [batch_size]
             loss = lp + lv
@@ -93,8 +127,17 @@ def train():
 
         # It's good practice to save checkpoints less frequently, e.g., every 5-10 epochs
         # or based on validation performance, but for now, this is fine.
-        torch.save(model.state_dict(), f"models/ckpt_{epoch}.pt")
+        checkpoint_save_path = f"models/model2/ckpt_{epoch}.pt"  # Use a consistent path
+        torch.save({
+            'epoch': epoch,
+            'model_state_dict': model.state_dict(),
+            'optimizer_sparse_state_dict': opt_sparse.state_dict(),
+            'optimizer_dense_state_dict': opt_dense.state_dict(),
+            'avg_p_loss': avg_p_loss,  # Optional: save last loss
+            'avg_v_loss': avg_v_loss,  # Optional: save last loss
+        }, checkpoint_save_path)
+        #torch.save(model.state_dict(), f"weights/ckpt_{epoch}.pt")
 
 
-if __name__=="__main__":
+if __name__ == "__main__":
     train()

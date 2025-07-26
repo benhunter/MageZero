@@ -6,7 +6,7 @@ import train
 # The GLOBAL_MAX defines the size of the embedding layer's weight matrix.
 
 # Define the output path and ensure the directory exists
-output_dir = "exports/UWTempo2/ver3" # Example directory
+output_dir = "exports/UWTempo/ver2" # Example directory
 os.makedirs(output_dir, exist_ok=True)
 output_path = os.path.join(output_dir, "Model.onnx")
 
@@ -15,9 +15,10 @@ output_path = os.path.join(output_dir, "Model.onnx")
 model = train.Net(train.GLOBAL_MAX, train.ACTIONS_MAX)
 
 # Load the desired checkpoint
-checkpoint_path = "models/ckpt_20.pt" # IMPORTANT: Use your best/final checkpoint
+checkpoint_path = "models/model2/ckpt_3.pt" #was 7
 try:
-    model.load_state_dict(torch.load(checkpoint_path, map_location="cpu"))
+    checkpoint = torch.load(checkpoint_path, map_location="cuda")
+    model.load_state_dict(checkpoint['model_state_dict'])
     print(f"Successfully loaded checkpoint from {checkpoint_path}")
 except FileNotFoundError:
     print(f"ERROR: Checkpoint file not found at {checkpoint_path}. Exporting an uninitialized model.")

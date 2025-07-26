@@ -4,6 +4,8 @@ import struct
 import numpy as np
 import torch
 from torch.utils.data import Dataset, DataLoader
+from typing import Set, List, Tuple
+
 
 
 class LabeledStateDataset(Dataset):
@@ -92,15 +94,13 @@ def collate_batch(batch):
 
     return indices, offsets, policies, values
 
-
 if __name__ == "__main__":
     import sys
     import torch  # Make sure torch is imported if not already at the top
     from torch.utils.data import DataLoader  # Make sure DataLoader is imported
 
     # Assuming LabeledStateDataset and collate_batch are defined above in the same file
-
-    path = sys.argv[1] if len(sys.argv) > 1 else "data/UWTempo2/ver7/training.bin"  # Ensure this path is correct
+    path = sys.argv[1] if len(sys.argv) > 1 else "data/UWTempo/ver2/testing.bin"  # Ensure this path is correct
     ds = LabeledStateDataset(path)
     print(f"Dataset size: {len(ds)}")
     print(f"Global Vocabulary Size (S) from header: {ds.S}")
@@ -143,7 +143,7 @@ if __name__ == "__main__":
 
         if lbl > 0:
             wins += 1
-        if i >= 999:  # Stop after 1000 samples as in your original code
+        if i >= 99:  # Stop after 1000 samples as in your original code
             break
 
     if num_samples_to_process > 0:

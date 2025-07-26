@@ -1,3 +1,7 @@
 /data/
 /models/
 /exports
+/weights
+/old_data
+/exports
+/__pycache__
