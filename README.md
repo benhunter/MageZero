@@ -1,120 +1,115 @@
-**MageZero: A Deck-Local AI Framework for Magic: The Gathering**
+***
 
----
+# MageZero: A Deck-Local AI Framework for Magic: The Gathering
 
 ### 1. High-Level Philosophy
 
-MageZero is not a reinforcement learning (RL) agent in itself. It is a framework for training and managing deck-specific RL agents for Magic: The Gathering (MTG). Rather than attempting to generalize across the entire game with a monolithic model, MageZero decomposes MTG into smaller, more tractable subgames. Each 60–120 card deck is treated as a self-contained "bubble" that can be mastered independently using focused, lightweight RL techniques.
+MageZero is not a reinforcement learning (RL) agent in itself. It is a framework for training and managing deck-specific RL agents for Magic: The Gathering (MTG). Rather than attempting to generalize across the entire game with a monolithic model, MageZero decomposes MTG into smaller, more tractable subgames. Each deck is treated as a self-contained "bubble" that can be mastered independently using focused, lightweight RL techniques.
 
 This approach reframes the challenge of MTG AI from universal mastery to local optimization. By training agents within constrained, well-defined deck environments, MageZero can develop competitive playstyles and meaningful policy/value representations without requiring LLM-scale resources.
 
-MageZero is built to exploit biases of MTG that are often overlooked when discussing MTG AI. (MTG is often seen as having almost no bias and being more of a language problem than a tradition RL game). 
-These biases are:  
-- **Combinatorial nature:** MTG decks are built around overlapping combinations of synergistic cards. In every deck every card has purpose, and that purpose largely remains the same across different opponents and gamestates. This bias is exploited through mini deck subsets that are part of a training curriculum.  
-- **Deck-specific Structure:** While on a whole MTG is as abstract as a language, within the context of one deck MTG is more strucutred than chess. The challenge is identifying and exploiting this structure as it is not explicitly defined. This is why MageZero leans toward lighter less generalizable models, with more dynamic and adaptable feature extraction and learning curriculums.  
-
-#### Core Components:
-- **Deck-local learning**: Each agent is trained from scratch on a single deck.
-- **Combinatorial minideck bootstrapping**: High-synergy card subsets are automatically identified and simulated in isolation to expose agents to core strategic interactions.
-- **Dynamic feature hashing**: A flexible encoding system that supports sparse, open-ended state representation while maintaining fixed-size inputs.
-- **Modular architecture**: At any point, training operates on a maximum of two 60 card decks in context: its own and opponents.
+MageZero is built to exploit biases of MTG that are often overlooked. These biases are:
+* **Combinatorial Nature**: MTG decks are built around overlapping combinations of synergistic cards. In every deck, every card has a purpose, and that purpose largely remains the same across different opponents and **game states**.
+* **Deck-specific Structure**: While **as a whole** MTG is as abstract as a language, within the context of one deck, MTG can be more structured than chess. The challenge is identifying and exploiting this structure, as it is not explicitly defined. MageZero leans toward lighter, less generalizable models, with more dynamic feature extraction.
 
 ---
 
-### 2. Inspirations
+### 2. Current Status: **Alpha (Actively in Development)**
 
-MageZero draws from a range of research traditions:
-- **AlphaZero (Silver et al., 2017)**: Self-play with Monte Carlo Tree Search and joint policy/value networks.
-- **Feature hashing (Weinberger et al., 2009)**: Sparse encodings for large-scale discrete input spaces.
-- **Curriculum learning (Bengio et al., 2009)**: Gradual exposure to increasing task complexity.
+The core infrastructure for MageZero is complete and undergoing testing. The full end-to-end pipeline—from simulation and data generation in Java to model training in PyTorch and back to inference via an ONNX model—is functional.
 
-while there is no one source this project borrows heavily from current trends in meta learning and dynamic curriculums.
-
-### 3. Pipeline Overview
- - Xmage simulations: this is the main hardware bottleneck for me right now, each simulation runs on a seperate thread and my cpu from 2017 only has 8 cores; in addition to this as simulations are built in java, the heap space fills up rapidly (I only have 16gb RAM). This bottleneck has prevented me from being able to start training and testing the model since currently a 20 turn mcts simulation on a medium difficulty deck takes 15-20min based on testing and can often fail due to heap errors. 
- - State Encoding/Vectorization: This system is implemented and tetsted within Xmage. As game states are encountered during self play, a hierarchal map of features is hashed in real time, this multilayered map structure is stored in Features.java. This map structure is serialized to a file and loaded before each simulation to keep mappings consistent between sims. Each vector created from each state is labeled with Win/loss and MCTS derived policy and exported for training in pytorch. This is as much as ive implemented so far.
- - DL models: standard lightweight feedforward network. Since I havent been able to test/work on this yet, optimizer, layers, loss function, etc are all TBD. The goal/design of MageZero is to keep this model as lightweight as possible and ideally alleviate as much learning stress as possible through engineered bias/redundency in the feature vector, and synergy based training curriculum. AlphaZero used a convulation layer to introduce bias, for MageZero minidecks fill that role.
- - Minideck Curriculum: the planned solution for finding implicit structure within decks. The goal of this curriculum will be to identify the synergies unique to each deck from the ground up. This is the core design of MageZero and what I will spend the most time researching. Nothing is set in stone at the moment since I still need to get the model working, but the plan is to use a 'Hasse-walk' approach on a Hasse diagram to stochastically sample minideck combinations based on previously identified synergy.
-- Largescale Simulation: the final step/goal. Start creating a rich 60 card simulation envirement where agents learn to master different matchups in addition to their own deck. 
-
-### 4. Game Engine & Feature Encoding
-
-MageZero is implemented atop XMage, an open-source MTG simulator, with custom integration via `ComputerPlayer8.java`.
-
-GitHub Repository: [https://github.com/WillWroble/mage](https://github.com/WillWroble/mage)
-
-Game state is captured via `StateEncoder.java`, which converts each decision point into a binary feature vector reflecting:
-- Card presence by zone
-- Active abilities and attachments (within each card)
-- unique multi-occurence hashes for each feature
-- game meta data (life total, cards per zone, etc)
-- numeric features are represented as discrete levels (life total 20,19,18 all map to seperate bits) cardinality is represented through thresholds (the bit for 20 life turns on every life total bit below it so it effectively resprsents the condition of having 20 or more life)
-- subfeatures (abilities within specific creature) are mapped uniquely per parent but also pool up to parent for additional abstraction (llanawar elves on the battlefield has the subfeature: 'green' and will pass this up to the battlefield feature which will start a count of all green permanents on the battlefield which passes to all zones etc.)
-
-Features are dynamically assigned to slots in a preallocated bit vector (e.g., 20,000 bits) on first occurrence. Completely redundent co-occuring features can be masked without disrupting index alignment. during testing this has resulted in a final binary vector of around 2500 features after 100 simulated games with heurisitc mcts. (2000 with heuristic minimax)
+The current focus is on **optimizing the simulation pipeline** and executing the **second conceptual benchmark**: demonstrating that the MCTS agent can learn and iteratively improve its performance against a fixed, heuristic opponent in a complex matchup (UW Tempo vs. Mono-Green).
 
 ---
 
-### 5. Neural Network Architecture
+### 3. Core Components & Pipeline
 
-`MageZero uses a lightweight feedforward network with dual heads:
-- **Policy head**: Trained on MCTS visit counts
-- **Value head**: Trained on game outcome estimates
+MageZero's architecture is an end-to-end self-improvement cycle.
 
-The network input is a unified feature vector with partitions for base game, deck-specific and opponent-specific features. tentative planned input size is 4000 bits based on observed encoding data. (because features are hashed dynamically extra space is required for features discovered during traing)
+#### **Game Engine & Feature Encoding**
+MageZero is implemented atop XMage, an open-source MTG simulator. Game state is captured via a custom `StateEncoder.java`, which converts each decision point into a high-dimensional binary feature vector.
 
-- Initialization: Base is pre initialized (this includes features like life total, turn phase etc.) player and opponent weights are zero or small random initialized.
-- Optimization: Standard AlphaZero loss for now (cross-entropy + MSE).
+* **Dynamic Feature Hashing**: This system supports a sparse, open-ended state representation while maintaining fixed-size inputs for the network. Features are dynamically assigned to slots in a preallocated bit vector (e.g., 200,000 bits) on first occurrence. A typical deck matchup utilizes a ~5,000 feature slice of this space.
+* **Hierarchical & Abstracted Features**: The encoding captures not just card presence but also sub-features (like abilities on a card) and game metadata (life totals, turn phase). Numeric features are discretized, and cardinality is represented through thresholds. Sub-features pool up to parent features, creating additional layers of abstraction (e.g., a "green" sub-feature on a creature contributes to a "green permanents on the battlefield" count), providing a richer, more redundant signal for the model.
 
----
+#### **Neural Network Architecture**
+The model is a Multi-Layer Perceptron (MLP) designed to be lightweight but effective for the deck-local learning task.
 
-### 6. Training Flow
+* **Structure**: A massive, sparse embedding bag (for up to 200,000 features) feeds into a series of dense layers (512 -> 256) before splitting into two heads:
+    * **Policy Head**: Predicts the optimal action (trained with Cross-Entropy Loss).
+    * **Value Head**: Estimates the probability of winning (trained with Mean Squared Error).
+* **Optimization**: The network uses a combination of Adam and SparseAdam optimizers.
 
-- Pure MCTS rollout on singleton and pair minidecks for feature discovery
-- Synergy-based minideck curriculum construction
-- Full-deck fine-tuning via self-play
-- Matchup tuning using opponent-specific modules
+#### **Initial Model Performance**
+The network has proven capable of learning complex game patterns from relatively small datasets. The following results were achieved training the model to predict the behavior of AI agents in the UW Tempo vs. Mono-Green matchup.
 
----
-### 7. Theoretical Hasse scheduler
+| Training Data Source | Sample Size | Engineered Abstraction | Policy Accuracy | Value Loss |
+| :--- | :--- | :--- | :--- | :--- |
+| Minimax (UW Tempo only) | ~9,000 | Yes | 90+% | <0.1 |
+| Minimax (Both Players) | ~9,000 | Yes | 88% | <0.1 |
+| MCTS (UW Tempo only) | ~9,000 | Yes | 85% | <0.15 |
+| Minimax (UW Tempo only) | ~2,000 | Yes | 80% | - |
+| Minimax (UW Tempo only) | ~2,000 | No | 68% | - |
 
-- Initially simulates minideck evirements for each individual card and pair of cards, creating a Hasse diagram
-- Calculate synergy metric between single cards by measuring difference in combined winrate of cards vs individual winrates.
-- Use this synergy metric to stochastically sample set expansions from the leaf nodes of the Hasse diagram for further sims. the goal is to create groups of minidecks that have strong intersynergy with each other. This is to train the agent in a structured way from the ground up in high signal low noise envirements. This is necessary for mtg where many decks have a very rigid and contrived play style ie. combo decks.
+#### **MCTS Self-Improvement Loop**
+The training process is a cycle of play, learning, and improvement, based on the AlphaZero methodology.
 
----
-### 7. Current Progress
-
-- Dynamic encoder and feature merging system implemented and tested in Java
-- Custom MCTS variant integrated into XMage environment
-- Training infrastructure prepared but currently bottlenecked by hardware limitations
-
----
-
-### 8. Core Challenges
-
-- **State space sparsity**: MTG's enormous and irregular board state space demands a non-static representation.
-- **No pre-learned representation or embedding**: Since MageZero's goal is to avoid generalizing to all of MTG, older simpler vectorization schemes for massive discrete spaces must be used.   
-- **Subset explosion**: Efficient sampling and pruning strategies are necessary to keep the synergy discovery tractable.
-- **Hardware bottlenecks**: MCTS simulations remain expensive, limiting the scale of training and evaluation.
-- **Evaluation methodology**: No gold standard exists for MTG AI benchmarking. Internal metrics and simulated leagues are in development.
-- **Long-horizon reward discovery**: Some interactions (e.g., Millennium Calendar Probem) only emerge after dozens of turns. Mini-deck isolation is critical for providing early reward gradients.
+1.  **Bootstrapping (Gen 0)**: We simulate ~250 games where the agent plays against a baseline heuristic minimax agent to generate an initial dataset (~9,000 states). The neural network is trained on this data to create the "Gen 0" model.
+2.  **MCTS-Guided Play**: The Gen 0 model is integrated into a custom MCTS agent. The agent again plays against the same fixed minimax opponent. It uses the network's policy/value predictions and a PUCT formula with Dirichlet noise to guide its search and ensure robust exploration.
+3.  **Data Collection**: Game states and the final MCTS visit counts (which become the new, improved policy labels) are saved to a replay buffer. The final game outcome provides the value label.
+4.  **Retraining**: The model is retrained on data from the replay buffer, creating the "Gen 1" model.
+5.  **Iteration**: The process repeats. Each new generation of the model is trained on data produced by its predecessor, allowing it to iteratively refine its strategy against the static opponent.
 
 ---
 
-### 9. Future Directions
+### 4. Current Progress & Benchmarks
 
-- Build a competent mono-green agent as a baseline.
-- Experiment with hand crafted minideck curriculums for mono green agent to see how it affects the learning process.
-- Expand hand made mini-deck curriculum to more complex archetypes (elves, devotion, combo)
-- Study tradeoffs between engineered and emergent features
-- Start working on theoretical Hasse model for automated curriculum.
-- Develop a reusable library of matchup-specific opponent modules
-- Explore curriculum scheduling heuristics and auto-adjustment
-- Prepare research publication on dynamic hashing and combinatorial 'minideck' RL
-- Build a public-facing simulation engine for scalable deck diagnostics
+MageZero's development is structured around a series of conceptual benchmarks.
+
+#### **Benchmark 1: Model Viability**
+* **Goal**: Prove the neural network can learn to predict AI agent behavior in a specific matchup with high accuracy.
+* **Result**: **Success**. The model achieved >90% policy accuracy, validating the feature encoding and network architecture.
+
+#### **Benchmark 2: Iterative MCTS Improvement**
+* **Goal**: Demonstrate that the self-play loop can produce a tangible increase in win rate over successive generations against a fixed opponent.
+* **Status**: **In Progress**. The pipeline is functional but requires optimization. Initial test runs are underway:
+    * **Gen 0 (trained on minimax)**: ~8% win rate
+    * **Gen 1**: ~6% win rate
+    * **Gen 2**: ~10% win rate
+    * **Analysis**: The initial dip in performance is expected. The Gen 0 model is trained on a weak agent. The introduction of MCTS with Dirichlet noise forces exploration, which can degrade performance as the agent moves away from the deterministic policy it was trained on. Subsequent generations are expected to show a clear upward trend as the agent refines its strategy based on its own, more sophisticated search.
+
+#### Benchmark 3: Multi-Deck Learning
+* **Goal**: Demonstrate that **learning** can be shared or transferred between different decks, realizing the full vision of MageZero.
+* **Status**: **Planned**.
+* This will begin after Benchmark 2 is definitively passed.
 
 ---
 
-MageZero treats Magic not as one enormous problem, but as a modular ecosystem of tractable subgames. By letting agents specialize, synergize, and grow within structured but flexible boundaries, it opens the door to structured learning in one of the most strategically rich environments ever designed.
+### 5. Core Challenges & Roadmap
 
+* **Imperfect Information**: Unlike games like Go or Chess, Magic: The Gathering is a game of imperfect information where the opponent's hand and library are hidden. Standard Monte Carlo Tree Search (MCTS) is designed for perfect information games. Applying it here requires handling uncertainty, as the agent must make decisions without knowing the opponent's full state. This complicates the search process, which must account for a wide range of possible hidden cards rather than a single, known game state.
+* **Long-Horizon & Weak Reward Signals**: In MTG, the consequences of an early decision may not become apparent for many turns. This creates a difficult credit assignment problem, as the terminal reward (winning or losing) is often too delayed to effectively guide the agent. The immediate, turn-by-turn board state can be a poor indicator of success, making it challenging for the agent to learn winning long-term strategies from a weak signal.
+* **Need for a Flawed Bootstrap**: Given the weak reward signal, starting with a purely random policy is intractable. It is necessary to bootstrap the learning process with an initial policy, even a flawed one like that from the heuristic minimax agent. This provides an essential, albeit imperfect, initial gradient to guide the first generation of the MCTS agent, giving it a starting point from which to begin exploration and iterative improvement.
+* **Simulation Throughput**: MCTS simulations are computationally expensive. The primary bottleneck is optimizing the simulation pipeline to better leverage multi-core architectures and reduce memory overhead, which is critical for generating training data at a reasonable pace.
+* **Evaluation Methodology**: No gold standard exists for MTG AI benchmarking. Win rate against a fixed opponent is the current primary metric for tracking iterative improvement.
+
+My immediate goal is to complete Benchmark 2 before August 20th, 2025.
+
+1.  **Clean Up & Refactor**: Solidify the existing codebase for stability and readability.
+2.  **Optimize Pipeline**: Refactor the MCTS implementation to enable greater parallelization, significantly reducing the time required to generate training batches.
+3.  **Test & Tune**: With an optimized pipeline, perform extensive testing of the MCTS improvement loop to achieve a consistent increase in win rate across generations.
+
+If MageZero passes this second benchmark, I plan to commit to the project long-term and begin seeking collaborators to help actualize its potential as a functional application for the MTG community.
+
+---
+### 6. Sources and Inspirations
+
+MageZero draws from a range of research traditions in reinforcement learning and game theory.
+
+* **AlphaZero & MCTS**: The core self-play loop, use of a joint policy/value network, and the PUCT algorithm for tree search are heavily inspired by the work on AlphaGo and AlphaZero.
+    * Silver, D., Schrittwieser, J., Simonyan, K., et al. (2017). *Mastering the game of Go without human knowledge*. Nature, 550(7676), 354–359.
+    * Silver, D., Hubert, T., Schrittwieser, J., et al. (2018). *A general reinforcement learning algorithm that masters chess, shogi, and Go through self-play*. Science, 362(6419), 1140–1144.
+* **Feature Hashing**: The dynamic state vectorization method is an application of the hashing trick, a standard technique for handling large-scale, sparse feature spaces in machine learning.
+    * Weinberger, K., Dasgupta, A., Langford, J., Smola, A., & Attenberg, J. (2009). *Feature Hashing for Large Scale Multitask Learning*. Proceedings of the 26th Annual International Conference on Machine Learning.
+* **Curriculum Learning**: Though currently on the backburner, the initial concept for a "minideck curriculum" is based on the principle of gradually increasing task complexity to guide the learning process.
+    * Bengio, Y., Louradour, J., Collobert, R., & Weston, J. (2009). *Curriculum learning*. Proceedings of the 26th Annual International Conference on Machine Learning.

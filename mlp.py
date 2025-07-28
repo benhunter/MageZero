@@ -102,8 +102,8 @@ def train_mlp():
     # --- Data Loading and Vocabulary Creation ---
     # Make sure the path to your data is correct.
     try:
-        training_ds = LabeledStateDataset("data/UWTempo/ver2/training.bin")
-        testing_ds = LabeledStateDataset("data/UWTempo/ver2/testing.bin")
+        training_ds = LabeledStateDataset("data/UWTempo/ver1/training.bin")
+        testing_ds = LabeledStateDataset("data/UWTempo/ver1/testing.bin")
     except (FileNotFoundError, IOError) as e:
         print(f"FATAL: Could not load dataset. {e}")
         return

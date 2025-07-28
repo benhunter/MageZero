@@ -13,7 +13,7 @@ class Net(nn.Module):
     def __init__(self, num_embeddings, policy_size_A):
         super().__init__()
 
-        embedding_dim = 512  # Output of EmbeddingBag, matches your original fc1 output
+        embedding_dim = 1024  # Output of EmbeddingBag, matches your original fc1 output
         hidden_dim_mlp = 256  # Output of the main MLP block, matches your original fc2 output
 
         self.embedding_bag = nn.EmbeddingBag(
@@ -24,6 +24,8 @@ class Net(nn.Module):
         )
         # 1. Define the learnable bias parameter
         self.embedding_bias = nn.Parameter(torch.zeros(embedding_dim))
+        self.embedding_norm = nn.LayerNorm(embedding_dim)
+        self.embedding_dropout = nn.Dropout(p=0.3)
 
         self.fc_after_embedding = nn.Sequential(
             nn.Linear(embedding_dim, hidden_dim_mlp),  # From 512 to 256
@@ -37,10 +39,10 @@ class Net(nn.Module):
         )
 
     def forward(self, indices, offsets):
-        embedded_sum = self.embedding_bag(indices, offsets)
-        # 2. Add the bias to the embedding bag's output
-        biased_embedded_sum = embedded_sum + self.embedding_bias
-        h = self.fc_after_embedding(biased_embedded_sum)
+        emb = self.embedding_bag(indices, offsets)
+        emb = self.embedding_dropout(emb)
+        emb = self.embedding_norm(emb + self.embedding_bias)
+        h = self.fc_after_embedding(emb)
         return self.policy_head(h), self.value_head(h).squeeze(-1)
 
 
@@ -48,7 +50,7 @@ class Net(nn.Module):
 def train():
     ds1 = LabeledStateDataset("data/UWTempo/ver3/training.bin")
     #ds2 = LabeledStateDataset("data/UWTempo/ver3/training.bin")
-    combined_ds = Subset(ds1, range(0,2000)) #ConcatDataset([ds1, ds2])
+    combined_ds = ds1 #Subset(ds1, range(0,2000)) #ConcatDataset([ds1, ds2])
     dl = DataLoader(combined_ds, batch_size=128, shuffle=True, num_workers=4, collate_fn=collate_batch)
     model = Net(GLOBAL_MAX, ACTIONS_MAX).cuda()
 
@@ -61,7 +63,7 @@ def train():
     for name, param in model.named_parameters():
         if "embedding_bag" not in name:  # Exclude embedding_bag parameters
             dense_params.append(param)
-    opt_dense = optim.Adam(dense_params, lr=1e-3)
+    opt_dense = optim.Adam(dense_params, lr=5e-4)
 
     checkpoint_path = f"models/model0/ckpt_15.pt"  # Example: Starting from ckpt_16
 
@@ -127,7 +129,7 @@ def train():
 
         # It's good practice to save checkpoints less frequently, e.g., every 5-10 epochs
         # or based on validation performance, but for now, this is fine.
-        checkpoint_save_path = f"models/model2/ckpt_{epoch}.pt"  # Use a consistent path
+        checkpoint_save_path = f"models/model3/ckpt_{epoch}.pt"  # Use a consistent path
         torch.save({
             'epoch': epoch,
             'model_state_dict': model.state_dict(),

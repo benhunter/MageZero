@@ -25,7 +25,7 @@ def validate():
     kld_loss = nn.KLDivLoss(reduction="batchmean")
 
     for i in range(1, 21):
-        checkpoint_path = f"models/model2/ckpt_{i}.pt"  # Make sure this is the correct checkpoint
+        checkpoint_path = f"models/model3/ckpt_{i}.pt"  # Make sure this is the correct checkpoint
         try:
             checkpoint = torch.load(checkpoint_path, map_location="cuda")
             model.load_state_dict(checkpoint['model_state_dict'])

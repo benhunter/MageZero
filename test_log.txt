@@ -24,7 +24,7 @@ Test policy_accuracy=0.732
 
 #gen0:
 -samples: 250 (games)
--wr: 16%
+-wr: 18.4%
 -best epoch: 7
 -policy acc: 85%
 -value loss: 0.058
