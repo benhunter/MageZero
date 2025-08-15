@@ -5,15 +5,16 @@ from torch.utils.data import DataLoader
 
 # If Net is also in dataset.py or a separate model.py, adjust import accordingly.
 import train  # Or from train import Net, ACTIONS_MAX (if ACTIONS_MAX is defined there)
-from dataset import LabeledStateDataset, collate_batch  # CRITICAL: Import collate_batch
+from dataset import LabeledStateDataset, collate_batch, load_dataset_from_directory  # CRITICAL: Import collate_batch
 from train import EPOCH_COUNT
 
-
+SHOW_CONFUSION_MATRIX = True
 def validate():
 
-    test_ds = "data/UWTempo/ver1/testing/testing1.bin"
+    test_ds = "data/UWTempo/ver9/testing/testing9.bin"
     ds = LabeledStateDataset(test_ds)
-    dl = DataLoader(ds, batch_size=128, shuffle=False, num_workers=4, collate_fn=collate_batch)
+    #ds = load_dataset_from_directory("data/UWTempo/ver9/testing")
+    dl = DataLoader(ds, batch_size=128, shuffle=True, num_workers=16, collate_fn=collate_batch, pin_memory=True, persistent_workers=True)
 
     # 3. Model instantiation uses global vocab size (ds.S) and action size
     model = train.Net(train.GLOBAL_MAX, train.ACTIONS_MAX).cuda()  # should be GLOBAL_VOCAB_SIZE
@@ -25,7 +26,7 @@ def validate():
 
 
     for i in range(1, train.EPOCH_COUNT+1):
-        checkpoint_path = f"models/model4/ckpt_{i}.pt"  # Make sure this is the correct checkpoint
+        checkpoint_path = f"models/model9/ckpt_{i}.pt"  # Make sure this is the correct checkpoint
         try:
             checkpoint = torch.load(checkpoint_path, map_location="cuda")
             model.load_state_dict(checkpoint['model_state_dict'])
@@ -81,29 +82,30 @@ def validate():
         if total_policy_samples > 0:
             print(f"Test policy_accuracy={correct_policy_preds / total_policy_samples:.3f}")
             # NEW: Print the actual confusion matrix for the first 53 actions
-            print("--- Policy Confusion Matrix (True \\ Predicted) ---")
-            matrix_size = 53
+            if SHOW_CONFUSION_MATRIX:
+                print("--- Policy Confusion Matrix (True \\ Predicted) ---")
+                matrix_size = 53
 
-            # Ensure we don't try to print more than available actions
-            if train.ACTIONS_MAX < matrix_size:
-                print(
-                    f"Warning: ACTIONS_MAX ({train.ACTIONS_MAX}) is smaller than requested matrix size ({matrix_size}). Clamping to ACTIONS_MAX.")
-                matrix_size = train.ACTIONS_MAX
+                # Ensure we don't try to print more than available actions
+                if train.ACTIONS_MAX < matrix_size:
+                    print(
+                        f"Warning: ACTIONS_MAX ({train.ACTIONS_MAX}) is smaller than requested matrix size ({matrix_size}). Clamping to ACTIONS_MAX.")
+                    matrix_size = train.ACTIONS_MAX
 
-            sub_matrix = confusion_matrix[:matrix_size, :matrix_size]
+                sub_matrix = confusion_matrix[:matrix_size, :matrix_size]
 
-            # Print header for predicted actions
-            header = "True |" + "".join([f"{j: >4}" for j in range(matrix_size)])
-            print(header)
-            print("-" * len(header))
+                # Print header for predicted actions
+                header = "True |" + "".join([f"{j: >4}" for j in range(matrix_size)])
+                print(header)
+                print("-" * len(header))
 
-            # Print each row for true actions
-            for r in range(matrix_size):
-                row_str = f"{r: >4} |"
-                row_str += "".join([f"{sub_matrix[r, c].item(): >4}" for c in range(matrix_size)])
-                print(row_str)
+                # Print each row for true actions
+                for r in range(matrix_size):
+                    row_str = f"{r: >4} |"
+                    row_str += "".join([f"{sub_matrix[r, c].item(): >4}" for c in range(matrix_size)])
+                    print(row_str)
 
-            print("-" * 60)  # Separator for the next checkpoint
+                print("-" * 60)  # Separator for the next checkpoint
         else:
             print("No samples in test set to calculate accuracy.")
 

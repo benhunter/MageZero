@@ -121,7 +121,7 @@ def load_dataset_from_directory(directory_path: str) -> ConcatDataset:
 # --- Main execution block ---
 if __name__ == "__main__":
     # Define the directory where you save your game data files.
-    data_directory = "data/UWTempo/ver1/training"
+    data_directory = "data/UWTempo/ver7/training"
 
     try:
         # Load all datasets from the specified folder
