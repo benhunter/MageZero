@@ -88,12 +88,12 @@ def normalize_policy_labels(raw: torch.Tensor) -> torch.Tensor:
 
 def train():
     os.makedirs(f"models/{DECK_NAME}/ver{VER_NUMBER}", exist_ok=True)
-    ds = H5Indexed(f"data/{DECK_NAME}/ver{VER_NUMBER}/training")
+    ds_raw = H5Indexed(f"data/{DECK_NAME}/ver{VER_NUMBER}/training")
     #combined_ds = AvroIndexed("data/UWTempo/ver3/training/training.bin")
     print("Generating ignore list for combined dataset. to use for model")
-    ignore_list = create_redundancy_ignore_list(ds)
+    ignore_list = create_redundancy_ignore_list(ds_raw)
     if not MAKE_IGNORE_LIST: ignore_list = []
-    ds.ignore_list = ignore_list
+    ds = H5Indexed(f"data/{DECK_NAME}/ver{VER_NUMBER}/training", ignore_list)
     print("Saving ignore list to ignore.roar")
     ignore = BitMap(ignore_list)  # iterable of ints
     print(len(ignore))
@@ -103,7 +103,7 @@ def train():
     dl = DataLoader(ds, batch_size=128, shuffle=True, num_workers=0, collate_fn=collate_batch,
                     pin_memory=True, persistent_workers=False)
     #make validation dl (can be empty)
-    test_ds = H5Indexed(f"data/{DECK_NAME}/ver{VER_NUMBER}/testing")
+    test_ds = H5Indexed(f"data/{DECK_NAME}/ver{VER_NUMBER}/testing", ignore_list)
     dl_test = DataLoader(test_ds, batch_size=128, shuffle=False, num_workers=0, collate_fn=collate_batch,
                     pin_memory=True, persistent_workers=False)
 

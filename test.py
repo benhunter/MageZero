@@ -142,26 +142,26 @@ def validate(model, dl):
             print(f"Test priority_A_accuracy={correct_pA / total_pA_examples:.3f}")
             if SHOW_CONFUSION_MATRIX:
                 print_matrix(pA_matrix)
-            else:
-                print("No priority A samples in test set to calculate accuracy.")
+        else:
+            print("No priority A samples in test set to calculate accuracy.")
         if total_pB_examples > 0:
             print(f"Test priority_B_accuracy={correct_pB / total_pB_examples:.3f}")
             if SHOW_CONFUSION_MATRIX:
                 print_matrix(pB_matrix)
-            else:
-                print("No priority B samples in test set to calculate accuracy.")
+        else:
+            print("No priority B samples in test set to calculate accuracy.")
         if total_t_examples > 0:
             print(f"Test choose_target_accuracy={correct_t / total_t_examples:.3f}")
             if SHOW_CONFUSION_MATRIX:
                 print_matrix(t_matrix)
-            else:
-                print("No target samples in test set to calculate accuracy.")
+        else:
+            print("No target samples in test set to calculate accuracy.")
         if total_b_examples > 0:
             print(f"Test choose_use_accuracy={correct_b / total_b_examples:.3f}")
             if SHOW_CONFUSION_MATRIX:
                 print_matrix(b_matrix)
-            else:
-                print("No choose_use samples in test set to calculate accuracy.")
+        else:
+            print("No choose_use samples in test set to calculate accuracy.")
 
 if __name__ == "__main__":
     ds = H5Indexed(f"data/{DECK_NAME}/ver{VER_NUMBER}/testing")

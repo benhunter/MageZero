@@ -17,137 +17,136 @@ H5_RECIDX_DTYPE = np.dtype([("file", "i4"), ("row", "i8")])
 
 class H5Indexed(Dataset):
     """
-    Lazy, indexed dataset over one or more HDF5 files produced by XMage JHDF5 writer.
-
-    Expected datasets per file:
-      /indices     (int32, shape [NNZ])
-      /offsets     (int64, shape [N+1], offsets[0]==0, offsets[-1]==len(indices))
-      /action      (float32 or float64, shape [N, 128])
-      /isPlayer    (uint8, shape [N])
-      /actionType  (int32, shape [N])
-      /stateScore  (float32 or float64, shape [N])
-      /resultLabel (float32 or float64, shape [N])
+    Preloads all HDF5 shards into RAM for fast random access.
+    Expects per-file datasets:
+      /indices  (int32, [nnz])
+      /offsets  (int64, [N+1], offsets[0]=0, offsets[-1]=nnz)
+      /row      (float32, [N, A+4])  -> [policy(A), resultLabel, stateScore, isPlayer(0/1), actionType]
+    Returns (per sample):
+      (indices:int64[r], policy:float32[A], value:float32[1], is_player:float32[1], action_type:int64[1])
     """
 
-    def __init__(self, dir_path: str):
+    def __init__(self, dir_path: str, ignore: set[int] | None = None):
         p = Path(dir_path)
-        # pick up .h5 / .hdf5
         h5_paths = sorted(list(p.glob("*.h5")) + list(p.glob("*.hdf5")))
-        self.files: List[str] = [str(pp) for pp in h5_paths]
-
-        self.fhs: List[h5py.File] = []
-        self.ignore_list = set()
+        self.files = [str(pp) for pp in h5_paths]
 
         if not self.files:
-            print(f"No .h5/.hdf5 files in {dir_path}")
+            self.N = 0;
+            self.A = 0
+            self.indptr_t = torch.zeros(1, dtype=torch.long)
+            self.indices_t = torch.empty(0, dtype=torch.int32)
+            self.row_t = torch.empty(0, 0, dtype=torch.float32)
             return
 
-        # Build a flat (file,row) index
-        rows: List[np.ndarray] = []
-        total = 0
-        for fid, path in enumerate(self.files):
-            with h5py.File(path, "r") as f:
-                n, _= f["/action"].shape
-                if n > 0:
-                    a = np.empty(n, dtype=H5_RECIDX_DTYPE)
-                    a["file"].fill(fid)
-                    a["row"] = np.arange(n, dtype=np.int64)
-                    rows.append(a)
-                    total += n
+        indptr = [0];
+        indices_chunks = [];
+        row_chunks = []
+        nnz_cum = 0;
+        N_total = 0;
+        A_ref = None
 
-        self.idx = np.concatenate(rows) if rows else np.empty(0, dtype=H5_RECIDX_DTYPE)
-        print(f"Found {len(self.idx)} rows across {len(self.files)} file(s)")
+        for path in self.files:
+            with h5py.File(path, "r") as f:
+                off = f["/offsets"][...].astype(np.int64, copy=False)  # [N+1]
+                idx = f["/indices"][...].astype(np.int32, copy=False)  # [nnz]
+                row = f["/row"][...].astype(np.float32, copy=False)  # [N, A+4]
+                N = int(off.shape[0] - 1);
+                nnz = int(off[-1])
+                A_local = int(row.shape[1] - 4)
+                if A_ref is None:
+                    A_ref = A_local
+                else:
+                    assert A_local == A_ref, "Inconsistent A across shards"
+
+                indices_chunks.append(idx);
+                row_chunks.append(row)
+                if N > 0: indptr.extend((off[1:] + nnz_cum).tolist())
+                nnz_cum += nnz;
+                N_total += N
+
+        self.N = N_total;
+        self.A = A_ref if A_ref is not None else 0
+        indptr_np = np.asarray(indptr, dtype=np.int64)  # [N+1]
+        indices_np = (np.concatenate(indices_chunks) if indices_chunks
+                      else np.empty(0, dtype=np.int32))  # [nnz]
+        row_np = (np.concatenate(row_chunks, axis=0) if row_chunks
+                  else np.empty((0, self.A + 4), dtype=np.float32))  # [N, A+4]
+
+        # --- EAGER IGNORE (optional, once) ---
+        if ignore:
+            ign = np.fromiter(ignore, dtype=np.int32)
+            keep_all = ~np.isin(indices_np, ign, assume_unique=False)
+            new_indptr = np.empty_like(indptr_np)
+            new_indptr[0] = 0
+            write_pos = 0
+            for i in range(self.N):
+                a = indptr_np[i];
+                b = indptr_np[i + 1]
+                if b > a:
+                    m = keep_all[a:b];
+                    L = int(m.sum())
+                    if L:
+                        # compact kept indices forward (single pass)
+                        src = indices_np[a:b][m]
+                        indices_np[write_pos:write_pos + L] = src
+                    new_indptr[i + 1] = write_pos + L
+                    write_pos += L
+                else:
+                    new_indptr[i + 1] = write_pos
+            indices_np = indices_np[:write_pos]
+            indptr_np = new_indptr
+        # -------------------------------------
+
+        # store as tensors; __getitem__ uses zero-copy views
+        self.indptr_t = torch.from_numpy(indptr_np)  # int64 [N+1]
+        self.indices_t = torch.from_numpy(indices_np)  # int32 [nnz]
+        self.row_t = torch.from_numpy(row_np)  # float32 [N,A+4]
+
+
 
     def __len__(self) -> int:
-        if not self.files:
-            return 0
-        return int(self.idx.shape[0])
-
-    def __del__(self):
-        if self.fhs:
-            for fh in self.fhs:
-                try:
-                    fh.close()
-                except Exception:
-                    pass
-
-    def ensure_open(self):
-        if not self.fhs:
-            # Big raw data chunk cache (rdcc_*), no SWMR for faster reads
-            self.fhs = [
-                h5py.File(
-                    p, "r",
-                    swmr=False,  # faster if you don't need live-writes
-                    rdcc_nbytes=128 * 1024 * 1024*10,  # 128MB cache
-                    rdcc_nslots=1_000_003,  # large hash table to reduce collisions
-                    rdcc_w0=0.75
-                )
-                for p in self.files
-            ]
-
-    def _fetch_row(self, fid: int, row: int):
-        f = self.fhs[fid]
-
-        off = f["/offsets"]
-        a = int(off[row]);
-        b = int(off[row + 1])
-        sv_idx = f["/indices"][a:b]  # 1 read
-
-        row_full = f["/row"][row, :]  # 1 read (A+4)
-        A = row_full.shape[0] - 4
-        action_row = row_full[:A]
-        resultLbl = float(row_full[A + 0])
-        stateScore = float(row_full[A + 1])
-        isP = int(row_full[A + 2] > 0.5)
-        actionType = int(row_full[A + 3])
-
-        return sv_idx, action_row, resultLbl, isP, actionType, stateScore
+        return int(self.N)
 
     def __getitem__(self, k: int):
-        self.ensure_open()
-        ent = self.idx[k]
-        fid = int(ent["file"])
-        row = int(ent["row"])
+        a = int(self.indptr_t[k].item())
+        b = int(self.indptr_t[k + 1].item())
 
-        sv_idx, action_row, resultLbl, isP, aTy, stateScore = self._fetch_row(fid, row)
+        sv_idx_t = self.indices_t.narrow(0, a, b - a)  # int32 view
+        row_k = self.row_t[k]  # float32 [A+4] view
 
-        # apply ignore_list (same as your H5 path)
-        if self.ignore_list:
-            sv_idx = [j for j in sv_idx.tolist() if j not in self.ignore_list]
-        else:
-            sv_idx = sv_idx.tolist()
+        A = self.A
+        policy_t = row_k.narrow(0, 0, A)  # float32 [A]
+        value_t = row_k[A + 0].unsqueeze(0)  # float32 [1]
+        isP_t = (row_k[A + 2] > 0.5).float().unsqueeze(0)  # float32 [1]
+        aType_t = row_k[A + 3].to(torch.long).unsqueeze(0)  # int64 [1]
 
-        # map to tensors with same shapes/dtypes you used before
-        return (
-            torch.tensor(sv_idx, dtype=torch.long),                       # ragged indices
-            torch.tensor(action_row, dtype=torch.float32),                # policy [A]
-            torch.tensor([resultLbl], dtype=torch.float32),               # value [1]
-            torch.tensor([1.0 if isP else 0.0], dtype=torch.float32),     # is_player [1]
-            torch.tensor([aTy], dtype=torch.long),                        # action_type [1]
-        )
+        return sv_idx_t, policy_t, value_t, isP_t, aType_t
+
 def collate_batch(batch):
-    """
-    This collate function is essential for batching variable-length data.
-    """
-    indices_list, policy_list, value_list, is_player_list, action_type_list = [], [], [], [], []
-    for (idxs, policy, value, player, action_type) in batch:
-        indices_list.append(idxs)
-        policy_list.append(policy)
-        value_list.append(value)
-        is_player_list.append(player)
-        action_type_list.append(action_type)
+    n = len(batch)
+    lens = [b[0].numel() for b in batch]
+    total = int(sum(lens))
 
+    idxs = torch.empty(total, dtype=torch.int32)  # keep int32 for now
+    offsets = torch.empty(n, dtype=torch.long)
 
-    offsets = [0] + [len(idxs) for idxs in indices_list]
-    offsets = torch.cumsum(torch.LongTensor(offsets), dim=0)[:-1]
+    p = 0
+    for i, (ix, _, _, _, _) in enumerate(batch):
+        L = ix.numel()
+        if L: idxs[p:p+L].copy_(ix)              # bulk copy
+        offsets[i] = p
+        p += L
 
-    idxs = torch.cat(indices_list)
-    policies = torch.stack(policy_list)
-    values = torch.stack(value_list)
-    is_player_list = torch.stack(is_player_list)
-    action_types = torch.stack(action_type_list)
+    # single conversion for EmbeddingBag
+    idxs = idxs.to(torch.long)
 
-    return idxs, offsets, policies, values, is_player_list, action_types
+    policies     = torch.stack([b[1] for b in batch], 0)
+    values       = torch.stack([b[2] for b in batch], 0)
+    is_players   = torch.stack([b[3] for b in batch], 0)
+    action_types = torch.stack([b[4] for b in batch], 0)
+
+    return idxs, offsets, policies, values, is_players, action_types
 
 def create_redundancy_ignore_list(ds) -> Set[int]:
     """
@@ -235,7 +234,7 @@ def remove_one_hot_labels(dataset):
 
 if __name__ == "__main__":
     # Define the directory where you save your game data files.
-    data_directory = "data/MTGA_MonoU/ver7/training"
+    data_directory = "data/MTGA_MonoU/ver8/training"
 
     try:
         # Load dataset from the specified folder
