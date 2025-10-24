@@ -234,7 +234,7 @@ def remove_one_hot_labels(dataset):
 
 if __name__ == "__main__":
     # Define the directory where you save your game data files.
-    data_directory = "data/MTGA_MonoU/ver8/training"
+    data_directory = "data/MTGA_MonoU/ver9/training"
 
     try:
         # Load dataset from the specified folder
@@ -272,7 +272,7 @@ if __name__ == "__main__":
 
             if lbl > 0:
                 winning += 1
-            if i >= 1000:
+            if i >= 100000:
                 break
 
         print(f"\nDataset size: {len(full_dataset)}\n")

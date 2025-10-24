@@ -6,7 +6,7 @@ from torch.utils.data import DataLoader
 
 # If Net is also in dataset.py or a separate model.py, adjust import accordingly.
 from dataset import H5Indexed, collate_batch, create_redundancy_ignore_list, remove_one_hot_labels  # CRITICAL: Import collate_batch
-from train import Net, normalize_policy_labels, ActionType, GLOBAL_MAX, ACTIONS_MAX, VER_NUMBER, DECK_NAME, PRIORITY_A_MAX, PRIORITY_B_MAX, TARGETS_MAX, BINARY_MAX
+from train import Net, normalize_policy_labels, ActionType, GLOBAL_MAX, ACTIONS_MAX, VER_NUMBER, DECK_NAME, PRIORITY_A_MAX, PRIORITY_B_MAX, TARGETS_MAX, BINARY_MAX, lambda_pA, lambda_pB, lambda_t, lambda_b
 
 SHOW_CONFUSION_MATRIX = True
 
@@ -76,7 +76,7 @@ def validate(model, dl):
             if priority_mask.any():
                 log_probs_d = F.log_softmax(priority_logits[priority_mask][:, :PRIORITY_A_MAX], dim=1)
                 tgt = normalize_policy_labels(batch_policy_labels[priority_mask][:, :PRIORITY_A_MAX])
-                lpA = kld(log_probs_d, tgt)
+                lpA = kld(log_probs_d, tgt)*lambda_pA
                 s = log_probs_d.size(0)
                 total_pA_loss += lpA.item() * s
                 populate_matrix(pA_matrix, torch.argmax(tgt, dim=1), torch.argmax(log_probs_d, dim=1))
@@ -88,7 +88,7 @@ def validate(model, dl):
             if opponent_priority_mask.any():
                 log_probs_d = F.log_softmax(opponent_priority_logits[opponent_priority_mask][:, :PRIORITY_B_MAX], dim=1)
                 tgt = normalize_policy_labels(batch_policy_labels[opponent_priority_mask][:, :PRIORITY_B_MAX])
-                lpB = kld(log_probs_d, tgt)
+                lpB = kld(log_probs_d, tgt)*lambda_pB
                 s = log_probs_d.size(0)
                 total_pB_loss += lpB.item() * s
                 populate_matrix(pB_matrix, torch.argmax(tgt, dim=1), torch.argmax(log_probs_d, dim=1))
@@ -99,7 +99,7 @@ def validate(model, dl):
             if target_mask.any():
                 log_probs_d = F.log_softmax(target_logits[target_mask][:, :TARGETS_MAX], dim=1)
                 tgt = normalize_policy_labels(batch_policy_labels[target_mask][:, :TARGETS_MAX])
-                lt = kld(log_probs_d, tgt)
+                lt = kld(log_probs_d, tgt)*lambda_t
                 s = log_probs_d.size(0)
                 total_t_loss += lt.item() * s
                 populate_matrix(t_matrix, torch.argmax(tgt, dim=1), torch.argmax(log_probs_d, dim=1))
@@ -110,7 +110,7 @@ def validate(model, dl):
             if binary_mask.any():
                 log_probs_d = F.log_softmax(binary_logits[binary_mask][:, :BINARY_MAX], dim=1)
                 tgt = normalize_policy_labels(batch_policy_labels[binary_mask][:, :BINARY_MAX])
-                lb = kld(log_probs_d, tgt)
+                lb = kld(log_probs_d, tgt)*lambda_b
                 s = log_probs_d.size(0)
                 total_b_loss += lb.item() * s
                 populate_matrix(b_matrix, torch.argmax(tgt, dim=1), torch.argmax(log_probs_d, dim=1))

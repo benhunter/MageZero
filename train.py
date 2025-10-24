@@ -5,6 +5,8 @@ import torch.nn.functional as F
 from torch import nn, optim
 from torch.utils.data import DataLoader
 import os
+import math
+
 
 import test
 from dataset import H5Indexed, collate_batch,  create_redundancy_ignore_list
@@ -13,16 +15,31 @@ from pyroaring import BitMap
 MAKE_IGNORE_LIST = True
 ACTIONS_MAX = 128
 GLOBAL_MAX = 2000000
-EPOCH_COUNT = 20
-VER_NUMBER = 8
+EPOCH_COUNT = 60
+VER_NUMBER = 9
 DECK_NAME = "MTGA_MonoU"
 
 #TODO: wire into xmage data pipeline
 #for now just manually enter your matchup-specific action spaces here for optimal normalization(in XMage run getActionsSpaces())
-PRIORITY_A_MAX = 30
-PRIORITY_B_MAX = 20
-TARGETS_MAX = 60
+PRIORITY_A_MAX = 21
+PRIORITY_B_MAX = 22
+TARGETS_MAX = 38
 BINARY_MAX = 2
+
+def head_weight(K: int) -> float:
+    """
+    Analytic loss weight to equalize baseline CE scales:
+    lambda_K = ln(2) / ln(K)
+    """
+    if K <= 1:
+        raise ValueError("K must be >= 2 for cross-entropy.")
+    return math.log(2.0) / math.log(float(K))
+
+#per head weights
+lambda_pA = head_weight(PRIORITY_A_MAX)
+lambda_pB = head_weight(PRIORITY_B_MAX)
+lambda_t = head_weight(TARGETS_MAX)
+lambda_b = head_weight(BINARY_MAX)
 
 
 class ActionType(Enum):
@@ -62,7 +79,7 @@ class Net(nn.Module):
             nn.Linear(embedding_dim, hidden_dim_mlp),  # From 512 to 256
             nn.ReLU(),
         )
-        #policy heads (all 256->128)
+        #policy heads (4 x 256->128 + 1 x 256->2)
         self.player_priority_head = nn.Linear(hidden_dim_mlp, policy_size_A)
         self.opponent_priority_head = nn.Linear(hidden_dim_mlp, policy_size_A)
         self.target_head = nn.Linear(hidden_dim_mlp, policy_size_A)
@@ -75,8 +92,8 @@ class Net(nn.Module):
 
     def forward(self, indices, offsets):
         emb = self.embedding_bag(indices, offsets)
-        emb = self.embedding_dropout(emb)
         emb = self.embedding_norm(emb + self.embedding_bias)
+        emb = self.embedding_dropout(emb)
         h = self.fc_after_embedding(emb)
         return self.player_priority_head(h), self.opponent_priority_head(h), self.target_head(h), self.binary_head(h), self.value_head(h).squeeze(-1)
 
@@ -170,7 +187,7 @@ def train():
             if priority_mask.any():
                 log_probs_d = F.log_softmax(priority_logits[priority_mask][:,:PRIORITY_A_MAX], dim=1)
                 tgt = normalize_policy_labels(batch_policy_labels[priority_mask][:,:PRIORITY_A_MAX])
-                lpA = kld(log_probs_d, tgt)
+                lpA = kld(log_probs_d, tgt)*lambda_pA
                 s = log_probs_d.size(0)
                 total_pA_loss += lpA.item() * s
                 total_pA_examples += s
@@ -181,7 +198,7 @@ def train():
             if opponent_priority_mask.any():
                 log_probs_d = F.log_softmax(opponent_priority_logits[opponent_priority_mask][:,:PRIORITY_B_MAX], dim=1)
                 tgt = normalize_policy_labels(batch_policy_labels[opponent_priority_mask][:,:PRIORITY_B_MAX])
-                lpB = kld(log_probs_d, tgt)
+                lpB = kld(log_probs_d, tgt)*lambda_pB
                 s = log_probs_d.size(0)
                 total_pB_loss += lpB.item() * s
                 total_pB_examples += s
@@ -192,7 +209,7 @@ def train():
             if target_mask.any():
                 log_probs_d = F.log_softmax(target_logits[target_mask][:,:TARGETS_MAX], dim=1)
                 tgt = normalize_policy_labels(batch_policy_labels[target_mask][:,:TARGETS_MAX])
-                lt = kld(log_probs_d, tgt)
+                lt = kld(log_probs_d, tgt)*lambda_t
                 s = log_probs_d.size(0)
                 total_t_loss += lt.item() * s
                 total_t_examples += s
@@ -203,7 +220,7 @@ def train():
             if binary_mask.any():
                 log_probs_d = F.log_softmax(binary_logits[binary_mask][:,:BINARY_MAX], dim=1)
                 tgt = normalize_policy_labels(batch_policy_labels[binary_mask][:,:BINARY_MAX])
-                lb = kld(log_probs_d, tgt)
+                lb = kld(log_probs_d, tgt)*lambda_b
                 s = log_probs_d.size(0)
                 total_b_loss += lb.item() * s
                 total_b_examples += s

@@ -32,104 +32,111 @@ server_model.load_state_dict(ckpt["model_state_dict"])
 TORCH_THREADS = max(1, os.cpu_count() // 2)
 torch.set_num_threads(TORCH_THREADS)
 
-# Flask app with (optional) micro-batching
 app = Flask(__name__)
 
-BATCH_MS: float = 0.0   # 0 = no micro-batching now; set to 1–3 later if desired
-BATCH_MAX: int  = 32
 
 req_counter = 0
 req_counter_lock = threading.Lock()
 
 class Pending:
-    __slots__ = ("idx", "off", "evt", "out", "req_id", "pre_count", "post_count", "t_recv", "t_done")
+    __slots__ = ("idx", "off", "evt", "out", "req_id", "pre_count", "post_count", "t_recv", "t_done", "num_bags")
     def __init__(self, req_id, indices, offsets):
         # Apply ignore filter server-side (same as test/train do before batching)  # :contentReference[oaicite:4]{index=4}
         self.req_id = req_id
         self.pre_count = len(indices)
-        if indices:
-            indices = [i for i in indices if i not in IGNORE_BM]
+        indices, offsets, num_bags = apply_ignore(indices, offsets, GLOBAL_MAX, IGNORE_BM)
         self.post_count = len(indices)
-        self.idx = torch.tensor(indices, dtype=torch.long, device=DEVICE)
-        # If caller didn't send offsets, default to a single bag starting at 0
-        if not offsets:
-            offsets = [0]
+        self.num_bags = num_bags
+
+        # Only now construct tensors (avoid surfacing earlier CUDA errors here)
+        self.idx = torch.tensor(indices, dtype=torch.long)  # CPU
+        self.off = torch.tensor(offsets, dtype=torch.long)  # CPU
+
         self.t_recv = time.perf_counter()
-        self.off = torch.tensor(offsets, dtype=torch.long, device=DEVICE)
         self.evt = threading.Event()
         self.out = None
         self.t_done = 0.0
 
 Q: "Queue[Pending]" = Queue(maxsize=4096)
+def apply_ignore(indices: list[int], offsets: list[int] | None, global_max: int, ignore_bm: BitMap):
+    if not offsets:
+        offsets = [0]
+
+    if offsets[0] != 0:
+        offsets[0] = 0
+    if any(o < 0 for o in offsets):
+        raise ValueError("offsets contain negative values")
+    if any(offsets[i] > offsets[i+1] for i in range(len(offsets)-1)):
+        raise ValueError("offsets not non-decreasing")
+
+    if len(offsets) == 1:
+        # filter + bounds check
+        filt = [i for i in indices if (i in ignore_bm) is False and 0 <= i < global_max]
+        return filt, [0], 1
+
+    new_indices = []
+    new_offsets = [0]
+    n = len(indices)
+    for b in range(len(offsets)):
+        start = offsets[b]
+        end = offsets[b+1] if b+1 < len(offsets) else n
+        if not (0 <= start <= end <= n):
+            raise ValueError(f"bad bag bounds: {start}..{end} within 0..{n}")
+        bag = indices[start:end]
+        bag = [i for i in bag if (i in ignore_bm) is False and 0 <= i < global_max]
+        new_indices.extend(bag)
+        new_offsets.append(len(new_indices))
+    new_offsets = new_offsets[:-1]
+
+    return new_indices, new_offsets, len(new_offsets)
 
 def worker_loop():
     print(f"[INIT] Device={DEVICE}, torch threads={TORCH_THREADS}, "
-        f"model={MODEL}, ignore={IGNORE}, BATCH_MS={BATCH_MS}, BATCH_MAX={BATCH_MAX}")
+        f"model={MODEL}, ignore={IGNORE}")
     while True:
         p0 = Q.get()
         batch = [p0]
         t0 = time.time()
-        if BATCH_MS > 0:
-            while len(batch) < BATCH_MAX and (time.time() - t0) * 1000 < BATCH_MS:
-                try:
-                    batch.append(Q.get_nowait())
-                except Empty:
-                    break
 
-        if len(batch) == 1:
-            idx = batch[0].idx
-            off = batch[0].off
-            with torch.no_grad():
-                pA, pB, tgt, bin2, val = server_model(idx, off)   # Net forward returns logits + tanh value  # :contentReference[oaicite:5]{index=5}
-            # Shapes: [1, A], [1]
-            pA = pA.detach().to("cpu")
-            pB = pB.detach().to("cpu")
-            tgt = tgt.detach().to("cpu")
-            bin2 = bin2.detach().to("cpu")
-            val = val.detach().to("cpu")
 
-            batch[0].out = {
-                "policy_player": pA[0].tolist(),  # length = ACTIONS_MAX
-                "policy_opponent": pB[0].tolist(),  # length = ACTIONS_MAX
-                "policy_target": tgt[0].tolist(),  # length = ACTIONS_MAX
-                "policy_binary": bin2[0].tolist(),  # length = 2
-                "value": float(val[0].item())
+        p = batch[0]
+        with torch.no_grad():
+            idx = p.idx.to(DEVICE, non_blocking=True)
+            off = p.off.to(DEVICE, non_blocking=True)
+            pA, pB, tgt, bin2, val = server_model(idx, off)  # shapes: [B,A], [B,A], [B,A], [B,2], [B]
+
+        # move to CPU
+        pA = pA.detach().to("cpu")
+        pB = pB.detach().to("cpu")
+        tgt = tgt.detach().to("cpu")
+        bin2 = bin2.detach().to("cpu")
+        val = val.detach().to("cpu")
+
+        if p.num_bags == 1:
+            p.out = {
+                "policy_player": pA[0].tolist(),
+                "policy_opponent": pB[0].tolist(),
+                "policy_target": tgt[0].tolist(),
+                "policy_binary": bin2[0].tolist(),
+                "value": float(val[0].item()),
             }
-            batch[0].t_done = time.perf_counter()
-            batch[0].evt.set()
         else:
-            # Concatenate indices
-            idx_list = [p.idx for p in batch]
-            idx = torch.cat(idx_list, dim=0)
-
-            # One bag per request → offsets are cumulative sizes
-            sizes = [int(x.numel()) for x in idx_list]  # e.g., [len0, len1, ...]
-            offsets = [0]
-            running = 0
-            for s in sizes[:-1]:
-                running += s
-                offsets.append(running)
-            off = torch.tensor(offsets, dtype=torch.long, device=DEVICE)
-
-            with torch.no_grad():
-                pA, pB, tgt, bin2, val = server_model(idx, off)  # [B, A], [B, A], [B, A], [B, 2], [B]
-
-            pA = pA.detach().to("cpu")
-            pB = pB.detach().to("cpu")
-            tgt = tgt.detach().to("cpu")
-            bin2 = bin2.detach().to("cpu")
-            val = val.detach().to("cpu")
-
-            for i, p in enumerate(batch):
-                p.out = {
+            # Multi-bag in a single HTTP request -> array of maps
+            B = p.num_bags
+            p.out = [
+                {
                     "policy_player": pA[i].tolist(),
                     "policy_opponent": pB[i].tolist(),
                     "policy_target": tgt[i].tolist(),
                     "policy_binary": bin2[i].tolist(),
-                    "value": float(val[i].item())
+                    "value": float(val[i].item()),
                 }
-                p.t_done = time.perf_counter()
-                p.evt.set()
+                for i in range(B)
+            ]
+
+        p.t_done = time.perf_counter()
+        p.evt.set()
+
 
 threading.Thread(target=worker_loop, daemon=True).start()
 
