@@ -2,17 +2,19 @@
 
 ### 1. High-Level Philosophy
 
-MageZero is not a reinforcement learning (RL) agent in itself. It is a framework for training and managing deck-specific RL agents for Magic: The Gathering (MTG). Rather than attempting to generalize across the entire game with a monolithic model, MageZero decomposes MTG into smaller, more tractable subgames. Each deck is treated as a self-contained "bubble" that can be mastered independently using focused, lightweight RL techniques.
+MageZero is not a reinforcement learning (RL) agent in itself. It is a framework for training and managing deck-specific RL agents for Magic: The Gathering (MTG). Rather than attempting to generalize across the entire game with a monolithic model, MageZero decomposes MTG into smaller, more tractable subgames. Each deck is treated as a self-contained environment that can be mastered independently using focused, lightweight RL techniques.
 
-This approach reframes the challenge of MTG AI from universal mastery to local optimization. By training agents within constrained, well-defined deck environments, MageZero can develop competitive playstyles and meaningful policy/value representations without requiring LLM-scale resources.
+This approach reframes the challenge of MTG AI from universal mastery to local optimization. By training agents within constrained, well-defined deck environments, MageZero can develop competitive playstyles and meaningful policy/value representations without requiring LLM-scale resources. 
 
 ---
 
-### 2. Current Status: **Alpha (Actively in Development)**
+### 2. Current Status (October 2025): **Learning-MCTS agent implemented in Parralel AIvsAI environment in XMage**
 
-The core infrastructure for MageZero is complete and undergoing testing. The full end-to-end pipeline—from simulation and data generation in Java to model training in PyTorch and back to inference via an ONNX model—is functional.
+The core infrastructure for MageZero is complete and undergoing testing. The full end-to-end pipeline from simulation and data generation in Java to model training in PyTorch and back to inference via local python server is functional.
 
-MageZero has successfully passed its **second conceptual benchmark**, demonstrating iterative improvement of the MCTS agent against a fixed heuristic opponent in a complex matchup (UW Tempo vs. Mono-Green). The current focus is now on **optimizing the simulation pipeline** and scaling further self-play experiments.
+If you are interested in contributing or running locally see the setup guide. I am also always available at <willwroble@gmail.com>
+
+
 
 ---
 
@@ -24,73 +26,73 @@ MageZero's architecture is an end-to-end self-improvement cycle.
 
 MageZero is implemented atop XMage, an open-source MTG simulator. Game state is captured via a custom `StateEncoder.java`, which converts each decision point into a high-dimensional binary feature vector.
 
-* **Dynamic Feature Hashing**: This system supports a sparse, open-ended state representation while maintaining fixed-size inputs for the network. Features are dynamically assigned to slots in a preallocated bit vector (e.g., 200,000 bits) on first occurrence. A typical deck matchup utilizes a \~5,000 feature slice of this space.
-* **Hierarchical & Abstracted Features**: The encoding captures not just card presence but also sub-features (like abilities on a card) and game metadata (life totals, turn phase). Numeric features are discretized, and cardinality is represented through thresholds. Sub-features pool up to parent features, creating additional layers of abstraction (e.g., a "green" sub-feature on a creature contributes to a "green permanents on the battlefield" count), providing a richer, more redundant signal for the model.
+* **Dynamic Feature Hashing**: This system supports a sparse, open-ended state representation to handle all of the discrete artifacts and tokens MTG games can produce. This is done by use of a massive sparse Embedding Bag (2M features) with Weinberger style feature hashing. A typical 60card deck matchup utilizes a \~5,000 feature slice of this space. With usually around ~200 active features per state (after filtering redundent features) making chance of collision <0.01%. Since all decks share the same massive input space, overlapping deck feature slices allow for potential cross-deck learning.
+* **Hierarchical & Abstracted Features**: The hashing captures not just card presence but also sub-features (like abilities on a card) and game metadata (life totals, turn phase). Numeric features are discretized, and cardinality is represented through thresholds. Sub-features pool up to parent features, creating additional layers of abstraction (e.g., a "green" sub-feature on a creature contributes to a "green permanents on the battlefield" count), providing a richer, more redundant signal for the model.
 
 #### **Neural Network Architecture**
 
-The model is a Multi-Layer Perceptron (MLP) designed to be lightweight but effective for the deck-local learning task.
+The model is a specialized Multi-Layer Perceptron (MLP) with a 2M dimension Embedding Bag input layer and outputs to 4 policy heads, and 1 value head.  
 
-* **Structure**: A massive, sparse embedding bag (for up to 200,000 features) feeds into a series of dense layers (512 -> 256) before splitting into two heads:
-
-  * **Policy Head**: Predicts the optimal action (trained with Cross-Entropy Loss).
+* **Structure**: 
+  * **Embedding Bag**: 2M dimensions; uses 'SUM' (so gradients scale with active feature count) with sparseAdam, and usually has ~200 active binary feature indices.
+  * **Embedding Layer** 512 dimensions; uses biases + batch norm with dropout layer (could theoretically be a shared embedding space for all states across all decks in MTG since input space is global)
+  * **Hidden Layer** 256 dimensions; relu activation + biaes. (deck local embedding for policy + value)
+  * **Policy Heads**: all deck local or matchup local
+    * **Player Priority**: 128D; deck local; each logit corresponds to a priority action the Agent (PlayerA) can take (eg. activated abilities, casting spells). usually around ~20 logits are used per deck
+    * **Opponent Priority**: 128D; opponent deck local; each logit corresponds to a priority action the opponent (PlayerB could take). when running MCTS vs MCTS games. both Agents share one network. and use each head.
+    * **Targets**: 128D; matchup local; shared target space across both decks for all micro decisions involving targets. (this is used for selecting which attacking creature to use a blocker on). usually ~60 logits used per matchup
+    * **Binary decisions** 2D: matchup local; shared binary space for all binary decisions made by either player. (this is used to select blockers and attackers sequentially)
   * **Value Head**: Estimates the probability of winning (trained with Mean Squared Error). The target blends the MCTS root score (as in MuZero) with a discounted terminal reward.
-* **Optimization**: The network uses a combination of Adam and SparseAdam optimizers. Training incorporates dropout layers for regularization.
+* **Optimization**: The network uses a combination of Adam and SparseAdam optimizers. Training incorporates dropout layers (p=0.3) for regularization.
+* **Training**: all training samples are flagged with their decision type (player priority, opponent priority, target decision, binary decision). all sample types are trained together in mixed batches but policy gradients are gated to each sample's corresponding policy head. 
 
-#### **Initial Model Performance**
+### 4. Self-Play Results (as of October 2025)
 
-The network has proven capable of learning complex game patterns from relatively small datasets. The following results were achieved training the model to predict the behavior of AI agents in the UW Tempo vs. Mono-Green matchup.
-
-| Training Data Source    | Sample Size | Engineered Abstraction | Policy Accuracy | Value Loss |
-| ----------------------- | ----------- | ---------------------- | --------------- | ---------- |
-| Minimax (UW Tempo only) | \~9,000     | Yes                    | 90+%            | <0.1       |
-| Minimax (Both Players)  | \~9,000     | Yes                    | 88%             | <0.1       |
-| MCTS (UW Tempo only)    | \~9,000     | Yes                    | 85%             | <0.15      |
-| Minimax (UW Tempo only) | \~2,000     | Yes                    | 80%             | -          |
-| Minimax (UW Tempo only) | \~2,000     | No                     | 68%             | -          |
-
----
-
-### 4. Self-Play Results (as of Sept 2025)
-
-Against a fixed minimax baseline (UW Tempo vs Mono-Green), MageZero improved from **16% → 30% win rate** over seven self-play generations. UW Tempo was deliberately chosen for testing because it is a difficult, timing-based deck — ensuring MageZero could demonstrate the ability to learn complex and demanding strategies.
-
-**Win-rate trajectory**
-
-| Generation         | Win rate |
-| ------------------ | -------- |
-| Baseline (minimax) | **16%**  |
-| Gen 1              | 14%      |
-| Gen 2              | 18%      |
-| Gen 3              | 20%      |
-| Gen 4              | 24%      |
-| Gen 5              | 28%      |
-| Gen 6              | 29%      |
-| Gen 7              | **30%**  |
+See Results file
 
 **Current Simulation Metrics**
 
-* Games/hour (local, 13 CPU threads, 300-sim MCTS budget): \~150 games/hour
-* Single-thread MCTS sims/sec: \~150
+* Games/hour (local, 13 CPU threads, 300-sim MCTS budget): \~250 games/hour
+* Single-thread MCTS sims/sec: \~150 (4ghz)
 * 8-thread MCTS sims/sec: \~75 (limited by heavy heap usage)
-* Target after XMage optimizations: \~1,000 games/hour
-
+* network single batched inferences/sec: (~100)
 ---
 
-### 5. Critical Observations
+### 5. MCTS
 
-Through experimentation, several key lessons have emerged:
+MageZero uses the same combination of MCTS with Deep learning that Deep Mind's AlphaZero, Muzero and other variants have used to play Go, Chess, Shogi, and other strategy games at a superhuman level. Specifically we use the PUCT formulat as was originally outlined in the AlphaZero paper. 
 
-* **Search Depth as a Catalyst**: Deeper MCTS search is crucial to allow the network to receive meaningful updates without being overwhelmed by noise. Shallow searches tend to produce unstable or misleading gradients.
-* **Learning Speed and Depth**: An inverse relationship has been observed between the number of generations required per % improvement and the depth of search. Roughly, **doubling search depth makes the model learn almost twice as fast**.
-* **Exploration Strategy**: Instead of Dirichlet noise, MageZero uses very soft temperature sampling (with a tunable temperature parameter) and occasionally resets priors. This balances stability and exploration while avoiding overconfidence in early policies.
-* **Training Choices**:
+$$a^* = \arg\max_a \left[ Q(s,a) + c_{\text{puct}} \, P(s,a) \, \frac{\sqrt{N(s)}}{1 + N(s,a)} \right]$$
 
-  * Policy trained on decision states; value trained on all states.
-  * Tighter PyTorch-based ignore list reduces active feature space to \~2,700.
-  * Dropout layers improve regularization and generalization.
 
----
+we use c = 1.0. but otherwise keep the formula the same. however there were many other modifications that needed to be made.
+
+For one, unlike Chess, MTG has many different type of decision points. (priority, choosing targets, ordering triggers, attacking etc.) This is why we use a special policy head for each one, since all of these decisions can be game swinging and are highly learnable.
+
+We also don't use and Dirchlet noise or temp sampling like the original AlphaZero authors did. Instead we found we were able to get stable network progression by increasing search depth since MTG already has a lot of inherent randomness. 
+
+Another key difference was using a discount factor on the terminal label + blending it with the root Q value for more stable value targets for the network as employed by Muzero authors.
+
+$$
+v_{\text{target}}
+= (1-\lambda)\,S_{\text{root}}
+\;+\;
+\lambda\,\gamma^{T}\,z_T
+$$
+
+
+
+
+
+we also use a special blend for learning opponent playstyle when playing against other types of AI (eg minimax). We use the MCTS visits the agent had for the opponent at that node + K virtual visits for the observed action:
+
+$$
+\tilde N(s,a) = N_{\text{pred}}(s,a) + k \,[a = a_{\text{obs}}]
+\quad,\qquad
+\pi_{\text{opp}}(a \mid s) = \frac{\tilde N(s,a)}{\sum_b \tilde N(s,b)}
+$$
+
+
 
 ### 6. Challenges
 
