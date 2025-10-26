@@ -62,7 +62,7 @@ See Results file
 
 MageZero uses the same combination of MCTS with Deep learning that Deep Mind's AlphaZero, Muzero and other variants have used to play Go, Chess, Shogi, and other strategy games at a superhuman level. Specifically we use the PUCT formula as was originally outlined in the AlphaZero paper. 
 
-$$a^* = \arg\max_a \left[ Q(s,a) + c_{\text{puct}} \, P(s,a) \, \frac{\sqrt{N(s)}}{1 + N(s,a)} \right]$$
+$$a^* = \arg\max_a \left[ Q(s,a) + c_{\text{puct}}  P(s,a)  \frac{\sqrt{N(s)}}{1 + N(s,a)} \right]$$
 
 
 we use c = 1.0. but otherwise keep the formula the same. however there were many other modifications that needed to be made.
@@ -75,9 +75,9 @@ Another key difference was using a discount factor on the terminal label + blend
 
 $$
 v_{\text{target}}
-= (1-\lambda)\,S_{\text{root}}
-\;+\;
-\lambda\,\gamma^{T}\,z_T
+= (1-\lambda)S_{\text{root}}
++
+\lambda\gamma^{T}z_T
 $$
 
 
@@ -87,7 +87,7 @@ $$
 we also use a special blend for learning opponent playstyle when playing against other types of AI (eg minimax). We use the MCTS visits the agent had for the opponent at that node + K virtual visits for the observed action:
 
 $$
-\tilde N(s,a) = N_{\text{pred}}(s,a) + k \,[a = a_{\text{obs}}]
+\tilde N(s,a) = N_{\text{pred}}(s,a) + k [a = a_{\text{obs}}]
 \quad,\qquad
 \pi_{\text{opp}}(a \mid s) = \frac{\tilde N(s,a)}{\sum_b \tilde N(s,b)}
 $$
