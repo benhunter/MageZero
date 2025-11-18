@@ -145,28 +145,25 @@ def collate_batch(batch):
 
     return idxs, offsets, policies, values, is_players, action_types
 
-def create_redundancy_ignore_list(ds) -> Set[int]:
+def create_redundancy_ignore_list(ds, k=10) -> Set[int]:
     """
-    Find perfectly co-occurring (identical) binary features across the dataset
-    and return all but one index from each duplicate group. Unseen features aren't touched
+    constructs a data derived ignore list which includes perfectly redundant features, and features that occur less than k times.
     """
-    #make sparse matrix
+    # make sparse matrix
     rows_list, cols_list = [], []
 
-    sample_id = 0
+    num_samples = 0
 
     for (idxs, _, _, _, _) in ds:
         idxs_np = idxs.cpu().numpy().astype(np.int32, copy=False)
-        rows_list.append(np.full(idxs_np.shape, sample_id, dtype=np.int32))
+        rows_list.append(np.full(idxs_np.shape, num_samples, dtype=np.int32))
         cols_list.append(idxs_np)
-        sample_id += 1
+        num_samples += 1
 
     rows = np.concatenate(rows_list)
     cols = np.concatenate(cols_list)
 
-
     data = np.ones_like(cols, dtype=np.uint8)
-    num_samples = sample_id
 
     x_csc = coo_matrix(
         (data, (rows, cols)),
@@ -174,33 +171,29 @@ def create_redundancy_ignore_list(ds) -> Set[int]:
         dtype=np.uint8
     ).tocsc()
 
-    #group identical columns
+    # group identical columns
     groups = {}
     indptr = x_csc.indptr
     idxs = x_csc.indices
 
+    ignore = set()
+
     for j in range(GLOBAL_MAX):
         start, end = indptr[j], indptr[j + 1]
         key = tuple(idxs[start:end])  # () means unseen/empty
+        if len(key) <= k:
+            ignore.add(j)
         groups.setdefault(key, []).append(j)
 
-    #create ignore list
-    ignore = set()
-
-    unseen = groups.get((), [])
-    #ignore.update(unseen)
     for key, js in groups.items():
         if key == () or len(js) == 1:
             continue
         js.sort()
         ignore.update(js[1:])
 
-    num_duplicate_sets = sum(1 for k, v in groups.items() if k != () and len(v) > 1)
     kept = GLOBAL_MAX - len(ignore)
-    print(f"Analysis complete. Found {num_duplicate_sets} sets of redundant features.")
     print(f"A total of {len(ignore)} feature indices will be ignored.")
     print(f"{kept} feature indices were kept.")
-    print(f"{kept - len(unseen)} seen feature indices were kept.")
 
     return ignore
 

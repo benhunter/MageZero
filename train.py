@@ -12,22 +12,23 @@ import test
 from dataset import H5Indexed, collate_batch,  create_redundancy_ignore_list, filter_opponent_states
 from pyroaring import BitMap
 
-#add training data under: data/{deck name}/ver{1..10}/training/*.hdf5
+#add training data under: data/{deck name}/ver{your version num}/training/{your data}.hdf5
 DECK_NAME = "UWTempo"
-VER_NUMBER = 1
+VER_NUMBER = 8
 
 MAKE_IGNORE_LIST = True
 TRAIN_OPPONENT_HEAD = False #turn off when training on round-robin data
 ACTIONS_MAX = 128
 GLOBAL_MAX = 2000000
-EPOCH_COUNT = 60
+EPOCH_COUNT = 10
+USE_PREVIOUS_MODEL = True
 
 
 #TODO: wire into xmage data pipeline
 #for now just manually enter your matchup-specific action space sizes here for optimal normalization(in XMage run getActionsSpaces())
-PRIORITY_A_MAX = 28
+PRIORITY_A_MAX = 29
 PRIORITY_B_MAX = 22
-TARGETS_MAX = 19 #for round-robin only go up to targets from own deck
+TARGETS_MAX = 20 #for round-robin only go up to targets from own deck
 BINARY_MAX = 2
 
 def head_weight(K: int) -> float:
@@ -65,19 +66,22 @@ class Net(nn.Module):
     def __init__(self, num_embeddings, policy_size_A):
         super().__init__()
 
-        embedding_dim = 512  # Output of EmbeddingBag, matches your original fc1 output
-        hidden_dim_mlp = 256  # Output of the main MLP block, matches your original fc2 output
+
+        embedding_dim = 512  # Output of EmbeddingBag
+        hidden_dim_mlp = 256  # Output of the main MLP block
 
         self.embedding_bag = nn.EmbeddingBag(
             num_embeddings=num_embeddings,
             embedding_dim=embedding_dim,
             mode='sum',
             sparse=True
+            #,max_norm=1
         )
         # 1. Define the learnable bias parameter
         self.embedding_bias = nn.Parameter(torch.zeros(embedding_dim))
         self.embedding_norm = nn.LayerNorm(embedding_dim)
-        self.embedding_dropout = nn.Dropout(p=0.2)
+        self.embedding_dropout = nn.Dropout(p=0.5)
+        self.l1_penalty = None
 
         self.fc_after_embedding = nn.Sequential(
             nn.Linear(embedding_dim, hidden_dim_mlp),  # From 512 to 256
@@ -96,7 +100,15 @@ class Net(nn.Module):
 
     def forward(self, indices, offsets):
         emb = self.embedding_bag(indices, offsets)
-        emb = self.embedding_norm(emb + self.embedding_bias)
+
+        if self.training:
+            self.l1_penalty = emb.abs().sum() * 1e-7
+
+        #emb = emb + self.embedding_bias
+        #emb = F.relu(emb)
+        emb = self.embedding_norm(emb)
+
+
         emb = self.embedding_dropout(emb)
         h = self.fc_after_embedding(emb)
         return self.player_priority_head(h), self.opponent_priority_head(h), self.target_head(h), self.binary_head(h), self.value_head(h).squeeze(-1)
@@ -110,11 +122,37 @@ def normalize_policy_labels(raw: torch.Tensor) -> torch.Tensor:
 def train():
     os.makedirs(f"models/{DECK_NAME}/ver{VER_NUMBER}", exist_ok=True)
     ds_raw = H5Indexed(f"data/{DECK_NAME}/ver{VER_NUMBER}/training")
+
+
     #ignore handling
-    print("Generating ignore list for combined dataset. to use for model")
+    print("Generating ignore list from dataset to use for model")
     ignore_list = create_redundancy_ignore_list(ds_raw)
+
+    # model and data loaders
+    model = Net(GLOBAL_MAX, ACTIONS_MAX).cuda()
+
+    # optional start point
+    if USE_PREVIOUS_MODEL:
+        checkpoint_path = f"models/{DECK_NAME}/ver{VER_NUMBER}/model.pt"
+        try:
+            checkpoint = torch.load(checkpoint_path, map_location="cuda")
+            model.load_state_dict(checkpoint['model_state_dict'])
+            with open(f"models/{DECK_NAME}/ver{VER_NUMBER}/ignore.roar", "rb") as f:
+                ignore_list2 = BitMap.deserialize(f.read())
+                ignore_list.intersection_update(ignore_list2)
+            print(f"intersected with previous ignore list: {len(ignore_list2)} for final ignore list: {len(ignore_list)} leaving {GLOBAL_MAX-len(ignore_list)} features")
+            # opt_sparse.load_state_dict(checkpoint['optimizer_sparse_state_dict'])
+            # opt_dense.load_state_dict(checkpoint['optimizer_dense_state_dict'])
+            # start_epoch = checkpoint['epoch'] + 1 # Use this if you want to continue the same run
+            print(f"Successfully loaded checkpoint from {checkpoint_path}")
+        except FileNotFoundError:
+            print(f"INFO: Checkpoint file not found at {checkpoint_path}. Starting from scratch.")
+        except Exception as e:
+            print(f"ERROR: Could not load checkpoint. {e}. Starting from scratch.")
+
     if not MAKE_IGNORE_LIST: ignore_list = []
     print("Saving ignore list to ignore.roar")
+
     ignore = BitMap(ignore_list)  # iterable of ints
     with open(f"models/{DECK_NAME}/ver{VER_NUMBER}/ignore.roar", "wb") as f:
         f.write(ignore.serialize())
@@ -122,13 +160,14 @@ def train():
     #data sets with redundant filter
     ds = H5Indexed(f"data/{DECK_NAME}/ver{VER_NUMBER}/training", ignore_list)
     test_ds = H5Indexed(f"data/{DECK_NAME}/ver{VER_NUMBER}/testing", ignore_list)
-    #if round-robin filter out opponent state AFTER making the ignore list
+
+    #if round-robin filter out opponent states AFTER making the ignore list
     if not TRAIN_OPPONENT_HEAD:
         ds = filter_opponent_states(ds,TARGETS_MAX)
         test_ds = filter_opponent_states(test_ds,TARGETS_MAX)
 
-    #model and data loaders
-    model = Net(GLOBAL_MAX, ACTIONS_MAX).cuda()
+
+
     dl = DataLoader(ds, batch_size=128, shuffle=True, num_workers=0, collate_fn=collate_batch,
                     pin_memory=True, persistent_workers=False)
 
@@ -138,37 +177,29 @@ def train():
     test.SHOW_CONFUSION_MATRIX = False
 
     #optimizers
-    sparse_params = model.embedding_bag.parameters()
-    opt_sparse = optim.SparseAdam(sparse_params, lr=5e-4)#optim.SparseAdam(sparse_params, lr=1e-3)
+    opt_sparse = optim.SparseAdam(model.embedding_bag.parameters(), lr=5e-4)
+    #opt_sparse = torch.optim.Adagrad(model.embedding_bag.parameters(), lr=0.1,initial_accumulator_value=0.1)
     dense_params = []
-    for name, param in model.named_parameters():
-        if "embedding_bag" not in name:  # Exclude embedding_bag parameters
-            dense_params.append(param)
+    dense_weight_params, dense_bias_params = [], []
+    for name, p in model.named_parameters():
+        if "embedding_bag" in name:
+            continue
+        dense_params.append(p)
+        if p.ndim > 1:
+            dense_weight_params.append(p)
+        else:
+            dense_bias_params.append(p)
+
     opt_dense = optim.Adam(dense_params, lr=5e-4)
 
-    # optional start point
-    checkpoint_path = f"models/model0/ckpt_0.pt"
 
-    try:
-        checkpoint = torch.load(checkpoint_path, map_location="cuda")
-        model.load_state_dict(checkpoint['model_state_dict'])
-        opt_sparse.load_state_dict(checkpoint['optimizer_sparse_state_dict'])
-        opt_dense.load_state_dict(checkpoint['optimizer_dense_state_dict'])
-        # start_epoch = checkpoint['epoch'] + 1 # Use this if you want to continue the same run
-        print(f"Successfully loaded checkpoint from {checkpoint_path}")
-
-
-    except FileNotFoundError:
-        print(f"INFO: Checkpoint file not found at {checkpoint_path}. Starting from scratch.")
-    except Exception as e:
-        print(f"ERROR: Could not load checkpoint. {e}. Starting from scratch.")
 
     mse = nn.MSELoss()
     kld = nn.KLDivLoss(reduction='batchmean')
 
     #main training loop
     for epoch in range(1, EPOCH_COUNT+1):
-        total_pA_loss, total_pB_loss, total_t_loss, total_b_loss, total_v_loss = 0.0, 0.0, 0.0, 0.0, 0.0  # Initialize as floats
+        total_pA_loss, total_pB_loss, total_t_loss, total_b_loss, total_v_loss, total_l1_sparse_loss, total_l1_dense_loss = 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
         total_decision_examples, total_pA_examples, total_pB_examples, total_t_examples, total_b_examples = 0,0,0,0,0
         model.train()
 
@@ -241,14 +272,21 @@ def train():
                 lb = torch.zeros((), device=value_pred.device)
 
             lv = mse(value_pred, batch_value_labels.squeeze(-1))
+            l1_dense = 0
+            for param in dense_weight_params:
+                l1_dense += torch.sum(torch.abs(param))
+            l1_dense *= 1e-5
 
-            loss = lpA + lpB + lt + lb + lv
+            total_l1_dense_loss += l1_dense.item()
+            total_l1_sparse_loss += model.l1_penalty.item()
+            loss = lpA + lpB + lt + lb + lv #+ model.l1_penalty #+ l1_dense
 
             opt_sparse.zero_grad()
             opt_dense.zero_grad()
             loss.backward()
             opt_sparse.step()
             opt_dense.step()
+
 
             total_v_loss += lv.item()
 
@@ -257,7 +295,10 @@ def train():
         avg_t_loss = (total_t_loss / max(total_t_examples, 1))
         avg_b_loss = (total_b_loss / max(total_b_examples, 1))
         avg_v_loss = total_v_loss / len(dl)
-        print(f"Epoch {epoch}  priority_A_loss={avg_pA_loss:.3f}  priority_B_loss={avg_pB_loss:.3f} choose_target_loss={avg_t_loss:.3f} choose_use_loss={avg_b_loss:.3f} value_loss={avg_v_loss:.3f} decision_states={total_decision_examples}")
+        avg_l1_dense_loss = total_l1_dense_loss / len(dl)
+        avg_l1_sparse_loss = total_l1_sparse_loss / len(dl)
+        print(f"Epoch {epoch}  priority_A_loss={avg_pA_loss:.3f}  priority_B_loss={avg_pB_loss:.3f} choose_target_loss={avg_t_loss:.3f} choose_use_loss={avg_b_loss:.3f} value_loss={avg_v_loss:.3f} "
+              f"l1_dense={avg_l1_dense_loss} l1_sparse={avg_l1_sparse_loss} decision_states={total_decision_examples}")
         #run current model on testing set (if there is one)
         if len(test_ds)>0:
             test.validate(model, dl_test)
