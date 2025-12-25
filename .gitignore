@@ -11,10 +11,8 @@
 /__pycache__
 /exports
 ignore.roar
-*.png
-*.png
-*.png
 /__pycache__
 *.pyc
 *.pyc
 /.idea
+/stats_out
