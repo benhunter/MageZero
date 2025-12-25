@@ -36,7 +36,7 @@ For reference my estimate of the human WR against the 5 minimax bots:
 | vs MonoW | 52% | ~70% | -18 |
 | **Average (excl. mirror)** | **47.9%** | **~61%** | **-13** |
 
-*MageZero pilots UWTempo (an aggressive tempo deck) against minimax opponents playing much weaker starter decks, UWTempo is difficult to learn but overall is much more powerful as you can see.*
+*MageZero pilots UWTempo (an aggressive tempo deck) against minimax opponents playing much weaker starter decks, UWTempo is difficult to learn but overall is much more powerful as you can see. (1 training generation = 1000 games)*
 
 <p align="center">
   <img src="results/uwtempo_trajectory.png" width="80%" />
