@@ -8,17 +8,62 @@ This approach reframes the challenge of MTG AI from universal mastery to local o
 
 ---
 
-### 2. Current Status (October 2025): **Learning-MCTS agent implemented in Parralel AIvsAI environment in XMage**
+### 2. Current Status (December 2025): **Learning-MCTS agent implemented in Parallel AIvsAI environment in XMage**
 
 The core infrastructure for MageZero is complete and undergoing testing. The full end-to-end pipeline from simulation and data generation in Java to model training in PyTorch and back to inference via local python server is functional.
 
-If you are interested in contributing or running locally see the [setup guide]([url](https://github.com/WillWroble/MageZero/blob/main/setup_guide.md)). I am also always available at <willwroble@gmail.com>
+If you are interested in contributing or running locally see the [setup guide]([url]https://github.com/WillWroble/MageZero/setup_guide.md). I am also always available at <willwroble@gmail.com>
 
+
+also see [faq and future goals]([url]https://github.com/WillWroble/MageZero/faq_goals.md)
+
+---
+
+### 3. Self-Play Results (as of December 2025)
+
+Below is data from 2 long-running RL tests against a pool of 5 minimax (greedy AI) opponents playing mono colored decks.
+The decks chosen for RL ([UWTempo]([url]https://moxfield.com/decks/Bl76TS_q6E-HZ4G-s9_dlQ) and [Standard-MonoU]([url]https://moxfield.com/decks/Okxs-whgSkapj5kIXUgMPg)) were chosen deliberately for being extremely punishing for greedy AI. 
+UWTempo's WR with minimax was 16%, with RL it reached 66%. for Standard-MonoU the minimax opponent pool contained itself, 
+so you can see in the graph below how much worse the minimax AI was in the mirror.
+
+For reference my estimate of the human WR against the 5 minimax bots:
+
+| Opponent | MageZero WR | Human WR (est.) | Gap |
+|----------|-------------|-----------------|-----|
+| vs MonoB | 48% | ~65% | -17 |
+| vs MonoG | 34.5% | ~50% | -15.5 |
+| vs MonoR | 57% | ~60% | -3 |
+| vs MonoW | 52% | ~70% | -18 |
+| **Average (excl. mirror)** | **47.9%** | **~61%** | **-13** |
+
+*MageZero pilots UWTempo (an aggressive tempo deck) against minimax opponents playing much weaker starter decks, UWTempo is difficult to learn but overall is much more powerful as you can see.*
+
+<p align="center">
+  <img src="results/uwtempo_trajectory.png" width="80%" />
+  <br/>
+</p>
+
+*MageZero pilots Standard-MonoU (a reactive tempo deck) against minimax opponents playing similar power-level standard decks. Minimax performance varies by deck complexity - it plays straightforward creature decks like MonoG at near-human level but struggles with reactive strategies.*
+
+<p align="center">
+  <img src="results/standard_monou_trajectory.png" width="80%" />
+  <br/>
+</p>
+
+See results/roundrobin-trainlog.txt for raw data
+
+
+**Current Simulation Metrics**
+
+* Games/hour (local, 13 CPU threads, 300-sim MCTS budget): \~250 games/hour
+* Single-thread MCTS sims/sec: \~150 (4ghz)
+* 8-thread MCTS sims/sec: \~75 (limited by heavy heap usage)
+* network single batched inferences/sec: (~100)
 
 
 ---
 
-### 3. Core Components & Pipeline
+### 4. Core Components & Pipeline
 
 MageZero's architecture is an end-to-end self-improvement cycle.
 
@@ -26,7 +71,7 @@ MageZero's architecture is an end-to-end self-improvement cycle.
 
 MageZero is implemented atop XMage, an open-source MTG simulator. Game state is captured via a custom `StateEncoder.java`, which converts each decision point into a high-dimensional binary feature vector.
 
-* **Dynamic Feature Hashing**: This system supports a sparse, open-ended state representation to handle all of the discrete artifacts and tokens MTG games can produce. This is done by use of a massive sparse Embedding Bag (2M features) with Weinberger style feature hashing. A typical 60card deck matchup utilizes a \~5,000 feature slice of this space. With usually around ~200 active features per state (after filtering redundent features) making chance of collision <0.01%. Since all decks share the same massive input space, overlapping deck feature slices allow for potential cross-deck learning.
+* **Dynamic Feature Hashing**: This system supports a sparse, open-ended state representation to handle all the discrete artifacts and tokens MTG games can produce. This is done by use of a massive sparse Embedding Bag (2M features) with Weinberger style feature hashing. A typical 60card deck matchup utilizes a \~5,000 feature slice of this space. With usually around ~200 active features per state (after filtering redundant features) making chance of collision <0.01%. Since all decks share the same massive input space, overlapping deck feature slices allow for potential cross-deck learning.
 * **Hierarchical & Abstracted Features**: The hashing captures not just card presence but also sub-features (like abilities on a card) and game metadata (life totals, turn phase). Numeric features are discretized, and cardinality is represented through thresholds. Sub-features pool up to parent features, creating additional layers of abstraction (e.g., a "green" sub-feature on a creature contributes to a "green permanents on the battlefield" count), providing a richer, more redundant signal for the model.
 
 #### **Neural Network Architecture**
@@ -36,7 +81,7 @@ The model is a specialized Multi-Layer Perceptron (MLP) with a 2M dimension Embe
 * **Structure**: 
   * **Embedding Bag**: 2M dimensions; uses 'SUM' (so gradients scale with active feature count) with sparseAdam, and usually has ~200 active binary feature indices.
   * **Embedding Layer** 512 dimensions; uses biases + batch norm with dropout layer (could theoretically be a shared embedding space for all states across all decks in MTG since input space is global)
-  * **Hidden Layer** 256 dimensions; relu activation + biaes. (deck local embedding for policy + value)
+  * **Hidden Layer** 256 dimensions; relu activation. (deck local embedding for policy + value)
   * **Policy Heads**: all deck local or matchup local
     * **Player Priority**: 128D; deck local; each logit corresponds to a priority action the Agent (PlayerA) can take (eg. activated abilities, casting spells). usually around ~20 logits are used per deck
     * **Opponent Priority**: 128D; opponent deck local; each logit corresponds to a priority action the opponent (PlayerB could take). when running MCTS vs MCTS games. both Agents share one network. and use each head.
@@ -46,17 +91,6 @@ The model is a specialized Multi-Layer Perceptron (MLP) with a 2M dimension Embe
 * **Optimization**: The network uses a combination of Adam and SparseAdam optimizers. Training incorporates dropout layers (p=0.3) for regularization.
 * **Training**: all training samples are flagged with their decision type (player priority, opponent priority, target decision, binary decision). all sample types are trained together in mixed batches but policy gradients are gated to each sample's corresponding policy head. 
 
-### 4. Self-Play Results (as of October 2025)
-
-See Results file
-
-**Current Simulation Metrics**
-
-* Games/hour (local, 13 CPU threads, 300-sim MCTS budget): \~250 games/hour
-* Single-thread MCTS sims/sec: \~150 (4ghz)
-* 8-thread MCTS sims/sec: \~75 (limited by heavy heap usage)
-* network single batched inferences/sec: (~100)
----
 
 ### 5. MCTS
 
@@ -69,26 +103,26 @@ we use c = 1.0. but otherwise keep the formula the same. however there were many
 
 For one, unlike Chess, MTG has many different type of decision points. (priority, choosing targets, ordering triggers, attacking etc.) This is why we use a special policy head for each one, since all of these decisions can be game swinging and are highly learnable.
 
-We also don't use and Dirchlet noise or temp sampling like the original AlphaZero authors did. Instead we found we were able to get stable network progression by increasing search depth since MTG already has a lot of inherent randomness. 
+We also don't use and Dirichlet noise or temp sampling like the original AlphaZero authors did. Instead, we found we were able to get stable network progression by increasing search depth since MTG already has a lot of inherent randomness. 
 
-Another key difference was using a discount factor on the terminal label + blending it with the root Q value for more stable value targets for the network as employed by Muzero authors.
+Another key difference was using a TD-style discounting blend between intermediate MCTS root scores, and the next value target. This is much more stable than terminal only and stays bounded for MCTS. ($0.9 \leq \lambda \leq 0.95$ )
 
 $$
-v_{\text{target}}
-= (1-\lambda)S_{\text{root}}
-+
-\lambda\gamma^{T}z_T
+y_N = z
 $$
 
-
-
-
+$$
+y_i = \lambda\, y_{i+1} + (1 - \lambda)\, h_i
+$$
 
 we also use a special blend for learning opponent playstyle when playing against other types of AI (eg minimax). We use the MCTS visits the agent had for the opponent at that node + K virtual visits for the observed action:
 
 $$
 \tilde N(s,a) = N_{\text{pred}}(s,a) + k [a = a_{\text{obs}}]
-\quad,\qquad
+\quad
+$$
+$$
+\qquad
 \pi_{\text{opp}}(a \mid s) = \frac{\tilde N(s,a)}{\sum_b \tilde N(s,b)}
 $$
 

@@ -17,3 +17,4 @@ ignore.roar
 /__pycache__
 *.pyc
 *.pyc
+/.idea
