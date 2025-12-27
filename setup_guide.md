@@ -145,7 +145,7 @@ data/
             training/
                 *.hdf5
 ```
-it's also recommended to add a separate .hdf5 data file under `../testing/` to eval your model's performance (value loss should be < 0.04) 
+it's also recommended to add a separate .hdf5 data file under `../testing/` to eval your model's performance (value loss should be < 0.1) 
 ### **6.2 Configure Training Options**
 
 Navigate to the editable constants at the top of `train.py`:
@@ -272,7 +272,7 @@ conceptually a problem but just don't come up enough to justify implementation y
 
 * Discord: `inkling_6`
 * Email: `willwroble@gmail.com`
-* Contributions wanted: Java performance, network testing, new decks, XMage bug hunting. **see magezero-status**
+* Contributions wanted: Java performance, network testing, new decks, XMage bug hunting. **see [FAQ](https://github.com/WillWroble/MageZero/blob/main/faq_goals.md)**
 
 ---
 
