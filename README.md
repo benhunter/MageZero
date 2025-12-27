@@ -12,17 +12,17 @@ This approach reframes the challenge of MTG AI from universal mastery to local o
 
 The core infrastructure for MageZero is complete and undergoing testing. The full end-to-end pipeline from simulation and data generation in Java to model training in PyTorch and back to inference via local python server is functional.
 
-If you are interested in contributing or running locally see the [setup guide]([url]https://github.com/WillWroble/MageZero/setup_guide.md). I am also always available at <willwroble@gmail.com>
+If you are interested in contributing or running locally see the [setup guide](https://github.com/WillWroble/MageZero/blob/main/setup_guide.md). I am also always available at <willwroble@gmail.com>
 
 
-also see [faq and future goals]([url]https://github.com/WillWroble/MageZero/faq_goals.md)
+also see [FAQ and future goals](https://github.com/WillWroble/MageZero/blob/main/faq_goals.md)
 
 ---
 
 ### 3. Self-Play Results (as of December 2025)
 
 Below is data from 2 long-running RL tests against a pool of 5 minimax (greedy AI) opponents playing mono colored decks.
-The decks chosen for RL ([UWTempo]([url]https://moxfield.com/decks/Bl76TS_q6E-HZ4G-s9_dlQ) and [Standard-MonoU]([url]https://moxfield.com/decks/Okxs-whgSkapj5kIXUgMPg)) were chosen deliberately for being extremely punishing for greedy AI. 
+The decks chosen for RL ([UWTempo](https://moxfield.com/decks/Bl76TS_q6E-HZ4G-s9_dlQ) and [Standard-MonoU](https://moxfield.com/decks/Okxs-whgSkapj5kIXUgMPg)) were chosen deliberately for being extremely punishing for greedy AI. 
 UWTempo's WR with minimax was 16%, with RL it reached 66%. for Standard-MonoU the minimax opponent pool contained itself, 
 so you can see in the graph below how much worse the minimax AI was in the mirror.
 
@@ -36,7 +36,7 @@ For reference my estimate of the human WR against the 5 minimax bots:
 | vs MonoW | 52% | ~70% | -18 |
 | **Average (excl. mirror)** | **47.9%** | **~61%** | **-13** |
 
-*MageZero pilots UWTempo (an aggressive tempo deck) against minimax opponents playing much weaker starter decks, UWTempo is difficult to learn but overall is much more powerful as you can see.*
+*MageZero pilots UWTempo (an aggressive tempo deck) against minimax opponents playing much weaker starter decks, UWTempo is difficult to learn but overall is much more powerful as you can see. (1 training generation = 1000 games)*
 
 <p align="center">
   <img src="results/uwtempo_trajectory.png" width="80%" />
@@ -80,7 +80,7 @@ The model is a specialized Multi-Layer Perceptron (MLP) with a 2M dimension Embe
 
 * **Structure**: 
   * **Embedding Bag**: 2M dimensions; uses 'SUM' (so gradients scale with active feature count) with sparseAdam, and usually has ~200 active binary feature indices.
-  * **Embedding Layer** 512 dimensions; uses biases + batch norm with dropout layer (could theoretically be a shared embedding space for all states across all decks in MTG since input space is global)
+  * **Embedding Layer** 512 dimensions; uses layer norm with dropout layer (could theoretically be a shared embedding space for all states across all decks in MTG since input space is global)
   * **Hidden Layer** 256 dimensions; relu activation. (deck local embedding for policy + value)
   * **Policy Heads**: all deck local or matchup local
     * **Player Priority**: 128D; deck local; each logit corresponds to a priority action the Agent (PlayerA) can take (eg. activated abilities, casting spells). usually around ~20 logits are used per deck
@@ -112,7 +112,7 @@ y_N = z
 $$
 
 $$
-y_i = \lambda\, y_{i+1} + (1 - \lambda)\, h_i
+y_i = \lambda y_{i+1} + (1 - \lambda) h_i
 $$
 
 we also use a special blend for learning opponent playstyle when playing against other types of AI (eg minimax). We use the MCTS visits the agent had for the opponent at that node + K virtual visits for the observed action:

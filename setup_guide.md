@@ -6,7 +6,7 @@
 * **Minimum:** any quad-core CPU + 16GB RAM
 * **Recommended:** 8–16 cores + 32–64GB RAM (MCTS is CPU heavy)
 * **GPU:** NVIDIA card w/ 8GB+ VRAM (for model training)
-* **Disk:** ~10GB for XMage + logs + model checkpoints (40GB+ recommended)
+* **Disk:** ~25GB for XMage + logs + model checkpoints (40GB+ recommended)
 
 ### **Software**
 
@@ -145,7 +145,7 @@ data/
             training/
                 *.hdf5
 ```
-it's also recommended to add a separate .hdf5 data file under `../testing/` to eval your model's performance (value loss should be < 0.04) 
+it's also recommended to add a separate .hdf5 data file under `../testing/` to eval your model's performance (value loss should be < 0.1) 
 ### **6.2 Configure Training Options**
 
 Navigate to the editable constants at the top of `train.py`:
@@ -184,7 +184,7 @@ all fields you set in `train.py` are reused here
 
 run:
 ```
-waitress-serve --host=127.0.0.1 --port=50052 --threads=8 server:app
+waitress-serve --host=127.0.0.1 --port=50052 --threads=6 server:app
 ```
 (port is automatically set to 50052 in XMage, use 50053 for an opponent model if doing RL vs RL)
 
@@ -234,13 +234,24 @@ example: `INFO  2025-11-23 19:07:36,018 Total: simulated 17443 evaluations in 30
 * Never trust <100 games for WR
 
 ---
+## **9. Human vs RL**
 
-## **9. Troubleshooting / Common Issues**
+You can play against your trained RL agent using the XMage Client, To do so:
 
-TODO
+1. make intelliJ run configuration for both XMage server and client. (see XMage dev guide https://github.com/magefree/mage/wiki/Setting-up-your-Development-Environment)
+2. run the server on localhost (default) if you get db errors delete the `.db` files in the server and/or client module and run again
+3. run the client and connect to your local server.
+4. choose `create bot match` button in the GUI, and under the opponent AI dropdown select `MageZero`. choose your decks (`.dck` files and start the match). Make sure you have the pytorch server running in the backround like for training. 
+---
+
+## **10. Troubleshooting / Common Issues**
+
+* **`Couldn't load deck, deck size=0`** - this error can happen for many reasons; the most likely being that the cardpool (mage-sets) isn't building/compiling properly. Clean and rebuild the maven project until you confirm mage-sets built without errors. make sure to rebuild with -DskipTests=true like in XMage setup guide.
+* **`Could not create Virtual env` or other GC errors** - this means ZGC is not compatible with your hardware, use G1GC instead (remove `-XX:+UseZGC` from run config, G1GC should be default)
+* **run starts but gets stuck midway through** - likely hdf5 file writing error. make sure you have ample disk space, correct output path `DATA_OUT_FILE_A` and >20 evals/sec from game logs.
 
 ---
-## **10. Limitations**
+## **11. Limitations**
 
 * Many niche abilities in MTG (enter the dungeon, controlling opponents turn, pre game decisions)
 These should work in XMage but will be invisible to the RL agent. (If you are a contributor looking to change that look at `StateEncoder.java`)
@@ -256,12 +267,12 @@ conceptually a problem but just don't come up enough to justify implementation y
 ---
 
 
-## **11. Roadmap & How to Get Involved**
+## **12. Contact & How to Get Involved**
 
 
 * Discord: `inkling_6`
 * Email: `willwroble@gmail.com`
-* Contributions wanted: Java performance, network testing, new decks, XMage bug hunting
+* Contributions wanted: Java performance, network testing, new decks, XMage bug hunting. **see [FAQ](https://github.com/WillWroble/MageZero/blob/main/faq_goals.md)**
 
 ---
 
