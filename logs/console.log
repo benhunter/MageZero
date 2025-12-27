@@ -1,18 +1,55 @@
-Generating ignore list from dataset to use for model
-A total of 1983760 feature indices will be ignored.
-16240 feature indices were kept.
-intersected with previous ignore list: 1975771 for final ignore list: 1975771 leaving 24229 features
-Successfully loaded checkpoint from models/Standard-MonoU/ver1/model.pt
-Saving ignore list to ignore.roar
-[opponent filter] scanned 820535 samples  kept 678339 (removed 142196 opponent states).
-[opponent filter] scanned 0 samples  kept 0 (removed 0 opponent states).
-Epoch 1  priority_A_loss=0.018  priority_B_loss=0.000 choose_target_loss=0.129 choose_use_loss=0.037 value_loss=0.037 l1_dense=0.5025071910642228 l1_sparse=0.1495992564002298 decision_states=372484
-Epoch 2  priority_A_loss=0.017  priority_B_loss=0.000 choose_target_loss=0.127 choose_use_loss=0.036 value_loss=0.036 l1_dense=0.5037336456100896 l1_sparse=0.15036689740869233 decision_states=372484
-Epoch 3  priority_A_loss=0.017  priority_B_loss=0.000 choose_target_loss=0.126 choose_use_loss=0.035 value_loss=0.035 l1_dense=0.5052590341612978 l1_sparse=0.1505431630139081 decision_states=372484
-Epoch 4  priority_A_loss=0.017  priority_B_loss=0.000 choose_target_loss=0.124 choose_use_loss=0.035 value_loss=0.035 l1_dense=0.5067622082525829 l1_sparse=0.1507296594597821 decision_states=372484
-Epoch 5  priority_A_loss=0.017  priority_B_loss=0.000 choose_target_loss=0.123 choose_use_loss=0.034 value_loss=0.034 l1_dense=0.5081803098714577 l1_sparse=0.15079775547362723 decision_states=372484
-Epoch 6  priority_A_loss=0.017  priority_B_loss=0.000 choose_target_loss=0.122 choose_use_loss=0.034 value_loss=0.034 l1_dense=0.5095986138424783 l1_sparse=0.15083249306341387 decision_states=372484
-Epoch 7  priority_A_loss=0.017  priority_B_loss=0.000 choose_target_loss=0.121 choose_use_loss=0.033 value_loss=0.034 l1_dense=0.5109681885872247 l1_sparse=0.15061903626148432 decision_states=372484
-Epoch 8  priority_A_loss=0.017  priority_B_loss=0.000 choose_target_loss=0.120 choose_use_loss=0.032 value_loss=0.033 l1_dense=0.5123837749238284 l1_sparse=0.15053188512207202 decision_states=372484
-Epoch 9  priority_A_loss=0.017  priority_B_loss=0.000 choose_target_loss=0.119 choose_use_loss=0.033 value_loss=0.033 l1_dense=0.5138053779557066 l1_sparse=0.15045301605226857 decision_states=372484
-Epoch 10  priority_A_loss=0.017  priority_B_loss=0.000 choose_target_loss=0.119 choose_use_loss=0.032 value_loss=0.033 l1_dense=0.5152832554196412 l1_sparse=0.15046083257164594 decision_states=372484
+Traceback (most recent call last):
+  File "C:\Users\owner\Documents\GitHub\MageZero\test.py", line 1, in <module>
+    import torch
+  File "C:\Users\owner\Documents\GitHub\MageZero\.venv\Lib\site-packages\torch\__init__.py", line 2611, in <module>
+    from torch import _meta_registrations
+  File "C:\Users\owner\Documents\GitHub\MageZero\.venv\Lib\site-packages\torch\_meta_registrations.py", line 12, in <module>
+    from torch._decomp import (
+    ...<4 lines>...
+    )
+  File "C:\Users\owner\Documents\GitHub\MageZero\.venv\Lib\site-packages\torch\_decomp\__init__.py", line 276, in <module>
+    import torch._decomp.decompositions
+  File "C:\Users\owner\Documents\GitHub\MageZero\.venv\Lib\site-packages\torch\_decomp\decompositions.py", line 16, in <module>
+    import torch._prims as prims
+  File "C:\Users\owner\Documents\GitHub\MageZero\.venv\Lib\site-packages\torch\_prims\__init__.py", line 525, in <module>
+    abs = _make_elementwise_unary_prim(
+        "abs",
+    ...<2 lines>...
+        type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.COMPLEX_TO_FLOAT,
+    )
+  File "C:\Users\owner\Documents\GitHub\MageZero\.venv\Lib\site-packages\torch\_prims\__init__.py", line 493, in _make_elementwise_unary_prim
+    return _make_prim(
+        schema=f"{name}(Tensor self) -> Tensor",
+    ...<2 lines>...
+        **kwargs,
+    )
+  File "C:\Users\owner\Documents\GitHub\MageZero\.venv\Lib\site-packages\torch\_prims\__init__.py", line 321, in _make_prim
+    prim_def = torch.library.custom_op(
+        "prims::" + name,
+    ...<2 lines>...
+        schema=schema,
+    )
+  File "C:\Users\owner\Documents\GitHub\MageZero\.venv\Lib\site-packages\torch\_library\custom_ops.py", line 173, in custom_op
+    return inner(fn)
+  File "C:\Users\owner\Documents\GitHub\MageZero\.venv\Lib\site-packages\torch\_library\custom_ops.py", line 154, in inner
+    result = CustomOpDef(namespace, opname, schema_str, fn)
+  File "C:\Users\owner\Documents\GitHub\MageZero\.venv\Lib\site-packages\torch\_library\custom_ops.py", line 204, in __init__
+    self._register_to_dispatcher()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\owner\Documents\GitHub\MageZero\.venv\Lib\site-packages\torch\_library\custom_ops.py", line 624, in _register_to_dispatcher
+    lib._register_fake(self._name, fake_impl, _stacklevel=4)
+    ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\owner\Documents\GitHub\MageZero\.venv\Lib\site-packages\torch\library.py", line 193, in _register_fake
+    source = torch._library.utils.get_source(_stacklevel + 1)
+  File "C:\Users\owner\Documents\GitHub\MageZero\.venv\Lib\site-packages\torch\_library\utils.py", line 54, in get_source
+    frame = inspect.getframeinfo(sys._getframe(stacklevel))
+  File "C:\Users\owner\AppData\Local\Programs\Python\Python313\Lib\inspect.py", line 1691, in getframeinfo
+    lines, lnum = findsource(frame)
+                  ~~~~~~~~~~^^^^^^^
+  File "C:\Users\owner\AppData\Local\Programs\Python\Python313\Lib\inspect.py", line 1072, in findsource
+    module = getmodule(object, file)
+  File "C:\Users\owner\AppData\Local\Programs\Python\Python313\Lib\inspect.py", line 1029, in getmodule
+    os.path.realpath(f)] = module.__name__
+    ~~~~~~~~~~~~~~~~^^^
+  File "<frozen ntpath>", line 764, in realpath
+KeyboardInterrupt

@@ -8,11 +8,11 @@ from pyroaring import BitMap
 from flask import Flask, request, Response
 import msgpack
 
-from train import Net, GLOBAL_MAX, ACTIONS_MAX, VER_NUMBER, DECK_NAME
+from train import Net, GLOBAL_MAX, ACTIONS_MAX, VER_NUMBER, DECK_NAME, load_model
 
 MODEL_DIR = f"models/{DECK_NAME}/ver{VER_NUMBER}"
 IGNORE = MODEL_DIR + "/ignore.roar"
-MODEL = MODEL_DIR + "/model.pt"
+MODEL = MODEL_DIR + "/model.pt.gz"
 
 # Device setup
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -26,7 +26,7 @@ VALID_RANGE = BitMap(range(GLOBAL_MAX))
 
 # Load model
 server_model = Net(GLOBAL_MAX, ACTIONS_MAX).to(DEVICE).eval()
-ckpt = torch.load(MODEL, map_location=DEVICE)
+ckpt = load_model(MODEL)
 server_model.load_state_dict(ckpt["model_state_dict"])
 
 # Threading config

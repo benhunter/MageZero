@@ -225,24 +225,21 @@ def filter_opponent_states(dataset, targets_max):
     """
     Return a torch.utils.data.Subset that excludes samples from opponent (Player B)'s perspective. and targeting samples that include opponent targets
     """
-    keep_indices = []
+    keep_states = []
     n = len(dataset)
 
 
     for i in range(n):
         _, policy, _, is_player, d_type = dataset[i]  # (indices, policy, value, isPlayer, decision type)
-
-        if int(d_type.item()) == 3 and not (policy[:targets_max] > 0).any().item():
-            continue
         if is_player:
-            keep_indices.append(i)
+            keep_states.append(i)
 
 
-    removed = n - len(keep_indices)
+    removed = n - len(keep_states)
     print(f"[opponent filter] scanned {n} samples "
-          f" kept {len(keep_indices)} (removed {removed} opponent states).")
+          f" kept {len(keep_states)} (removed {removed} opponent states).")
 
-    return Subset(dataset, keep_indices)
+    return Subset(dataset, keep_states)
 
 
 if __name__ == "__main__":

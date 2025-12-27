@@ -6,6 +6,7 @@ from torch import nn, optim
 from torch.utils.data import DataLoader
 import os
 import math
+import gzip
 
 
 import test
@@ -26,9 +27,9 @@ USE_PREVIOUS_MODEL = True
 
 #TODO: wire into xmage data pipeline
 #for now just manually enter your matchup-specific action space sizes here for optimal normalization(XMage prints them at the start of each run)
-PRIORITY_A_MAX = 32
-PRIORITY_B_MAX = 32
-TARGETS_MAX = 32 #for round-robin only go up to targets from own deck
+PRIORITY_A_MAX = 128
+PRIORITY_B_MAX = 128
+TARGETS_MAX = 128
 BINARY_MAX = 2
 
 def head_weight(K: int) -> float:
@@ -45,6 +46,12 @@ lambda_pA = head_weight(PRIORITY_A_MAX)
 lambda_pB = head_weight(PRIORITY_B_MAX)
 lambda_t = head_weight(TARGETS_MAX)
 lambda_b = head_weight(BINARY_MAX)
+
+def load_model(path):
+    if path.endswith('.gz'):
+        with gzip.open(path, 'rb') as f:
+            return torch.load(f)
+    return torch.load(path)
 
 
 class ActionType(Enum):
@@ -138,9 +145,10 @@ def train():
 
     # optional start point
     if USE_PREVIOUS_MODEL:
-        checkpoint_path = f"models/{DECK_NAME}/ver{VER_NUMBER}/model.pt"
+        checkpoint_path = f"models/{DECK_NAME}/ver{VER_NUMBER}/model.pt.gz"
         try:
-            checkpoint = torch.load(checkpoint_path, map_location="cuda")
+            #checkpoint = torch.load(checkpoint_path, map_location="cuda")
+            checkpoint = load_model(checkpoint_path)
             model.load_state_dict(checkpoint['model_state_dict'])
             with open(f"models/{DECK_NAME}/ver{VER_NUMBER}/ignore.roar", "rb") as f:
                 ignore_list2 = BitMap.deserialize(f.read())
@@ -308,15 +316,16 @@ def train():
             test.validate(model, dl_test)
         #TODO: make validation based checkpoint schedule
         if epoch == EPOCH_COUNT:
-            checkpoint_save_path = f"models/{DECK_NAME}/ver{VER_NUMBER}/model.pt"  # Use a consistent path
-            torch.save({
-                'epoch': epoch,
-                'model_state_dict': model.state_dict(),
-                'optimizer_sparse_state_dict': opt_sparse.state_dict(),
-                'optimizer_dense_state_dict': opt_dense.state_dict(),
-                'avg_p_loss': avg_pA_loss,  # Optional: save last loss
-                'avg_v_loss': avg_v_loss,  # Optional: save last loss
-            }, checkpoint_save_path)
+            checkpoint_save_path = f"models/{DECK_NAME}/ver{VER_NUMBER}/model.pt.gz"
+            with gzip.open(checkpoint_save_path, 'wb') as f:
+                torch.save({
+                    'epoch': epoch,
+                    'model_state_dict': model.state_dict(),
+                    'optimizer_sparse_state_dict': opt_sparse.state_dict(),
+                    'optimizer_dense_state_dict': opt_dense.state_dict(),
+                    'avg_p_loss': avg_pA_loss,  # Optional: save last losses
+                    'avg_v_loss': avg_v_loss,
+                }, f)
 
 if __name__ == "__main__":
     train()

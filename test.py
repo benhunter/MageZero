@@ -6,6 +6,7 @@ from torch.utils.data import DataLoader
 
 from dataset import H5Indexed, collate_batch, filter_opponent_states
 import train
+
 SHOW_CONFUSION_MATRIX = True
 
 mse = nn.MSELoss()
@@ -190,9 +191,10 @@ if __name__ == "__main__":
     model = train.Net(train.GLOBAL_MAX, train.ACTIONS_MAX).cuda()
     model.eval()
 
-    checkpoint_path = f"models/{train.DECK_NAME}/ver{train.VER_NUMBER}/model.pt"  # Make sure this is the correct checkpoint
+    checkpoint_path = f"models/{train.DECK_NAME}/ver{train.VER_NUMBER}/model.pt.gz"  # Make sure this is the correct checkpoint
     try:
-        checkpoint = torch.load(checkpoint_path, map_location="cuda")
+        checkpoint = train.load_model(checkpoint_path)
+        #checkpoint = torch.load(checkpoint_path, map_location="cuda")
         model.load_state_dict(checkpoint['model_state_dict'])
         print(f"Loaded checkpoint from {checkpoint_path}")
     except FileNotFoundError:
