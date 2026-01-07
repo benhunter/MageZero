@@ -65,6 +65,11 @@ See results/roundrobin-trainlog.txt for raw data
 
 ---
 
+### 3.2 Emergent Behavior
+
+By far the most interesting emergent behavior to come from MageZero so far, came from the card [Cecil Death Knight](https://scryfall.com/card/fin/380/cecil-dark-knight-cecil-redeemed-paladin). While playing against the [Standard-MonoB](https://moxfield.com/decks/R3zCVSK78kWyOwzAUyHUJg) deck agent i've been training, I noticed from the logs it wasn't playing its one-drop, Cecil, despite having nothing else to do on the first 2 turns. I initially assumed this was a glitch as I was on the play and was curving out (playing the same deck myself). By the time it played it, (on turn 3 with 12 life), I realized what it was doing actually made perfect sense. If it had played Cecil, (a 2/3 deathtoucher) it would have stopped my attacks and it would have probably just sat there as a 2/3 the whole game. By letting me lower it's life total before playing it, Cecil immediatly becomes a threat, since on the next turn they can remove any blockers and flip it by attacking, which is exactly what it did. this is starting to feel like signs of life of a true AlphaZero agent. ie. completely weird, 'creative' play patterns that only come from pure, unbiased RL. an LLM bot (or a bot trained on human games) would never do this in a million years. I've played with Cecil on MTG arena and never thought of playing it this way. But next time I play standard I'll try this strategy, since it makes sense to me for many situations.
+
+---
 ### 4. Core Components & Pipeline
 
 MageZero's architecture is an end-to-end self-improvement cycle.
